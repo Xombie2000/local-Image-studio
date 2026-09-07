@@ -108,6 +108,7 @@ final class StudioStore: ObservableObject {
             loras = bootstrap.loras
             modelStatus = bootstrap.modelStatus
             promptHelper = bootstrap.promptHelper
+            lastHelperMetrics = generations.map(\.promptHelper).first(where: \.hasDisplayMetrics)
             restoreModelPreferences()
             if let active = bootstrap.activeJob {
                 activeJob = active
@@ -247,7 +248,6 @@ final class StudioStore: ObservableObject {
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
         promptImprovementNotice = nil
-        lastHelperMetrics = nil
         var payload: [String: Any] = [
             "prompt": prompt,
             "model_id": workspace.modelId,
@@ -291,7 +291,7 @@ final class StudioStore: ObservableObject {
                     if let status = job.modelStatus { modelStatus = status }
                     if let original = job.originalPrompt { workspace.originalPrompt = original }
                     if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
-                    if let metrics = job.promptHelper, metrics.model != nil { lastHelperMetrics = metrics }
+                    if let metrics = job.promptHelper, metrics.hasDisplayMetrics { lastHelperMetrics = metrics }
                     promptImprovementNotice = job.promptNotice
                     if job.state == "complete" {
                         let results = job.generations ?? job.generation.map { [$0] } ?? []

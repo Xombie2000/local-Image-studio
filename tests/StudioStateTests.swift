@@ -19,6 +19,15 @@ struct StudioStateTests {
         precondition(upscale.requestPayload["project_id"] as? String == "source-project")
         precondition(upscale.requestPayload["source_generation_id"] as? String == "source")
         precondition(UpscaleJob(sourceGenerationId: "ungrouped").requestPayload["project_id"] == nil)
+        precondition(HelperPresentation.name(for: "qwen/qwen3-4b-2507") == "Qwen3 4B Instruct")
+        precondition(!HelperPresentation.name(for: "qwen/qwen3-4b-2507").contains("6-bit"))
+        precondition(HelperPresentation.name(for: "organization/custom-model") == "Custom Model")
+        let missingMetrics = PromptHelperMetrics(model: "qwen/qwen3-4b-2507", tokensPerSecond: 0, timeToFirstToken: nil, tokenCount: 0, totalTime: nil)
+        precondition(!missingMetrics.hasDisplayMetrics)
+        let validMetrics = PromptHelperMetrics(model: "qwen/qwen3-4b-2507", tokensPerSecond: 185, timeToFirstToken: nil, tokenCount: 126, totalTime: 1.3)
+        precondition(validMetrics.displayParts == ["185 tok/s", "1.3 s", "126 tokens"])
+        precondition(PromptEditorSizing.height(for: "short") == 38)
+        precondition(PromptEditorSizing.height(for: "1\n2\n3\n4\n5\n6") == 72)
         let suite = "LocalImageStudio.RedesignStateTests"
         let defaults = UserDefaults(suiteName: suite)!
         if CommandLine.arguments.contains("--restore") {

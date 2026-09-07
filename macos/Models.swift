@@ -234,3 +234,45 @@ enum CanvasSizing {
         return CGSize(width: image.width * scale, height: image.height * scale)
     }
 }
+
+// Presentation only: picker tags and request IDs always retain the server ID.
+enum HelperPresentation {
+    static func name(for id: String) -> String {
+        let known = [
+            "qwen/qwen3-4b-2507": "Qwen3 4B Instruct",
+            "qwen3.6-35b-a3b-mlx": "Qwen3.6 35B A3B",
+            "google/gemma-4-26b-a4b-qat": "Gemma 4 26B A4B",
+            "ternary-bonsai-27b-mlx": "Ternary Bonsai 27B",
+            "muse-glimmer-30b": "Muse Glimmer 30B"
+        ]
+        if let name = known[id.lowercased()] { return name }
+        // A v1 model listing need not include quantization or a marketing name.
+        // Humanize unfamiliar IDs without inferring missing model properties.
+        return (id.split(separator: "/").last.map(String.init) ?? id)
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ").capitalized
+    }
+}
+
+extension PromptHelperMetrics {
+    var displayParts: [String] {
+        var parts: [String] = []
+        if let rate = tokensPerSecond, rate.isFinite, rate > 0 {
+            parts.append(rate < 0.01 ? "<0.01 tok/s" : rate < 1 ? String(format: "%.2f tok/s", rate) : String(format: "%.0f tok/s", rate))
+        }
+        if let latency = totalTime, latency.isFinite, latency > 0 {
+            parts.append(latency < 0.1 ? "<0.1 s" : String(format: "%.1f s", latency))
+        }
+        if let count = tokenCount, count > 0 { parts.append("\(count) tokens") }
+        return parts
+    }
+    var hasDisplayMetrics: Bool { model != nil && model != "Edited by user" && !displayParts.isEmpty }
+}
+
+// Two visible lines at rest, with a bounded expansion for explicit newlines.
+// Wrapped long text scrolls in the native TextEditor.
+enum PromptEditorSizing {
+    static func height(for prompt: String) -> CGFloat {
+        CGFloat(min(4, max(2, prompt.components(separatedBy: "\n").count))) * 17 + 4
+    }
+}

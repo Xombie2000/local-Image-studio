@@ -24,11 +24,27 @@ struct ContentView: View {
         .frame(minWidth: 940, minHeight: 680)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Picker("Image Model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
-                    ForEach(store.generationModels) { Text("\($0.label) · \($0.status)").tag($0.id) }
-                }.frame(maxWidth: 280).help("Image generation model").accessibilityLabel("Image Model")
+                HStack(spacing: 6) {
+                    Text("Generate with:").font(.subheadline).foregroundStyle(.secondary)
+                    Picker("Next generation model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
+                        ForEach(store.generationModels) { Text($0.label).tag($0.id) }
+                    }.labelsHidden().frame(maxWidth: 205)
+                        .help("Model for the next generation. The selected image’s model is shown in Image Info.")
+                        .accessibilityLabel("Next generation model")
+                    ModelResidencyButton()
+                }
             }
-            ToolbarItem(placement: .status) { ModelStatusLabel(status: store.modelStatus, job: store.activeJob) }
+            ToolbarItem(placement: .status) {
+                if store.modelStatus.status == "loading" || store.activeJob?.phase == "loading" {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text(store.activeJob?.message ?? "Loading image model…").font(.caption)
+                    }
+                } else {
+                    // Retain native toolbar spacing when the loading label is absent.
+                    Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+                }
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { store.exportImage() } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .disabled(store.selectedGeneration == nil || store.selectedGeneration?.archived == true).help("Export Image (⌘E)")
@@ -62,33 +78,39 @@ struct ContentView: View {
     }
 }
 
-struct ModelStatusLabel: View {
-    let status: ModelRuntimeStatus
-    let job: GenerationJob?
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if status.status == "loading" || job?.phase == "loading" {
-                ProgressView().controlSize(.small)
-            } else {
-                Circle()
-                    .fill(status.status == "loaded" ? Color.green : Color.secondary.opacity(0.5))
-                    .frame(width: 7, height: 7)
-            }
-            Text(label).font(.caption).foregroundStyle(.secondary)
+struct ModelResidencyButton: View {
+    @EnvironmentObject private var store: StudioStore
+    @State private var showingStatus = false
+    private var residency: String {
+        let status = store.modelStatus
+        if status.status == "loading" { return "Loading image model…" }
+        if status.status == "loaded", let id = status.modelId, id != "seedvr2_7b" {
+            let name = store.models.first(where: { $0.id == id })?.label ?? "Image model"
+            return "\(name) is loaded in memory."
         }
-        .help(status.activeMemoryBytes.map { "Worker active memory: \(formatBytes($0))" } ?? "No image model resident")
+        if status.modelId == "seedvr2_7b" {
+            return store.activeJob == nil ? "Last job used SeedVR2 for upscaling." : "SeedVR2 upscale is running."
+        }
+        return "No generation model is loaded in memory."
     }
-
-    private var label: String {
-        if job?.phase == "loading" {
-            return job?.message ?? "Loading…"
-        }
-        guard status.status == "loaded", let id = status.modelId else { return "Unloaded" }
-        if id == "seedvr2_7b" {
-            return job == nil ? "Ready" : "Upscaling"
-        }
-        return id.contains("9b") ? "9B Loaded" : "4B Loaded"
+    var body: some View {
+        Button { showingStatus.toggle() } label: { Image(systemName: "info.circle").foregroundStyle(.secondary) }
+            .buttonStyle(.plain).help("Image model availability and memory status")
+            .accessibilityLabel("Image model status")
+            .popover(isPresented: $showingStatus) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Image Models").font(.headline)
+                    ForEach(store.generationModels) { model in
+                        LabeledContent(model.label, value: model.status)
+                    }
+                    Divider()
+                    Text(residency)
+                    if let bytes = store.modelStatus.activeMemoryBytes, bytes > 1024 {
+                        Text("Worker active memory: \(formatBytes(bytes))").foregroundStyle(.secondary)
+                    }
+                    Text("Models load when needed for a job.").foregroundStyle(.secondary)
+                }.font(.callout).padding(16).frame(width: 290)
+            }
     }
 }
 
@@ -207,19 +229,20 @@ struct HistoryRow: View {
                 if store.treeDepth(for: generation) > 0 {
                     Image(systemName: "arrow.turn.down.right")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                        .help("Derived from a parent image")
                 }
                 Thumbnail(path: generation.thumbnailPath ?? generation.imagePath)
                     .frame(width: 54, height: 54)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(generation.originalPrompt)
+                    Text(generation.isUpscale ? "Upscale \(generation.upscaleScaleFactor ?? "")" : generation.originalPrompt)
                         .font(.caption)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
                         if generation.variantCount > 1 { Text("\(generation.variantIndex)/\(generation.variantCount)") }
-                        Text(generation.isUpscale ? "Upscale \(generation.upscaleScaleFactor ?? "")" : generation.parentId == nil ? "Original" : generation.referenceUsed ? "Edit" : "Variation / Fork")
+                        Text(generation.isUpscale ? "SeedVR2" : generation.parentId == nil ? "Original" : generation.referenceUsed ? "Edit" : "Variation / Fork")
                         Text("·")
                         Text(generation.date, style: .time)
                         if generation.archived { Image(systemName: "archivebox") }
@@ -434,11 +457,10 @@ struct ComposerView: View {
     @EnvironmentObject private var store: StudioStore
     @FocusState private var promptFocused: Bool
     private var promptHeight: CGFloat {
-        let lines = store.workspace.originalPrompt.components(separatedBy: "\n").count
-        return CGFloat(min(5, max(3, lines))) * 17 + 8
+        PromptEditorSizing.height(for: store.workspace.originalPrompt)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(store.workspace.mode == .edit ? "Describe your changes" : "Prompt").font(.headline)
                 if let name = store.workspace.referenceName {
@@ -452,7 +474,7 @@ struct ComposerView: View {
             }
             TextEditor(text: Binding(get: { store.workspace.originalPrompt }, set: { store.workspace.originalPrompt = $0; store.workspace.improvedPrompt = "" }))
                 .font(.body).scrollContentBackground(.hidden)
-                .frame(height: promptHeight).padding(5)
+                .frame(height: promptHeight).padding(3)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
                 .focused($promptFocused).accessibilityLabel("Image prompt")
                 .disabled(store.activeJob != nil)
@@ -487,7 +509,7 @@ struct ComposerView: View {
                     .accessibilityIdentifier("promptImprovementStatus")
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 12).background(.bar)
+        .padding(.horizontal, 16).padding(.vertical, 8).background(.bar)
         .overlay(alignment: .top) { Divider() }
         .sheet(isPresented: $store.showImprovedPrompt) { ImprovedPromptSheet() }
         .task(id: store.notice) {
@@ -504,24 +526,25 @@ struct HelperPicker: View {
         Picker("Prompt Helper", selection: Binding(get: { store.helperModelID }, set: { store.chooseHelper($0) })) {
             Text("Off").tag("off")
             if store.helperModelID.isEmpty { Text("Unavailable").tag("") }
-            ForEach(store.promptHelper.models, id: \.self) { Text($0).tag($0) }
+            ForEach(store.promptHelper.models, id: \.self) { Text(HelperPresentation.name(for: $0)).tag($0) }
             if !store.helperModelID.isEmpty && store.helperUnavailable {
-                Text("\(store.helperModelID) (unavailable)").tag(store.helperModelID)
+                Text("\(HelperPresentation.name(for: store.helperModelID)) (unavailable)").tag(store.helperModelID)
             }
-        }.pickerStyle(.menu).help("Choose a local text model independently of the image model")
+        }.pickerStyle(.menu).help(store.helperModelID == "off" ? "Prompt Helper is off" : "Server model ID: \(store.helperModelID)")
     }
 }
 
 struct HelperMetricsLabel: View {
     let metrics: PromptHelperMetrics
+    var includesModel = true
     var body: some View {
-        Text([
-            metrics.tokensPerSecond.map { String(format: "%.0f tok/s", $0) },
-            metrics.totalTime.map { String(format: "%.1f s", $0) },
-            metrics.tokenCount.map { "\($0) tok" }
-        ].compactMap { $0 }.joined(separator: " · "))
-        .font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-        .help("\(metrics.model ?? "Prompt Helper") — throughput is output tokens divided by total request latency.")
+        if metrics.hasDisplayMetrics {
+            Text(((includesModel ? [HelperPresentation.name(for: metrics.model!)] : []) + metrics.displayParts).joined(separator: " · "))
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                .help("\(metrics.model!) — throughput is output tokens divided by total request latency.")
+                .accessibilityIdentifier("promptHelperPerformance")
+        }
     }
 }
 
@@ -579,8 +602,8 @@ struct InspectorView: View {
                     }
                     if gen.promptHelper.model != nil {
                         Section("Prompt Helper") {
-                            Text(gen.promptHelper.model ?? "").font(.caption).textSelection(.enabled)
-                            HelperMetricsLabel(metrics: gen.promptHelper)
+                            Text(HelperPresentation.name(for: gen.promptHelper.model ?? "")).font(.caption).textSelection(.enabled).help(gen.promptHelper.model ?? "")
+                            HelperMetricsLabel(metrics: gen.promptHelper, includesModel: false)
                         }
                     }
                     Button("Generation Settings") { store.selectedGeneration = nil; store.workspace.mode = .fork }
