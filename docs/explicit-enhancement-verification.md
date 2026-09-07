@@ -64,3 +64,9 @@ Enhance is a small native secondary action; Generate remains prominent. Revert i
 Remaining verification limitation: the automation API does not expose a sustained native pointer hover, so unselected-row hover appearance could not be reliably held and captured. Selected-row trailing actions were exercised natively; cross-project behavior was verified via the shared context-menu action and direct store regression. No functional failure was found. Existing SQLite ResourceWarnings appeared in Python tests; all assertions passed.
 
 Test images/evidence remain available for review. The explicitly disposable child, original, and project were deleted through the tested native controls. No merge or release tag was performed.
+
+## Follow-up: fresh-image seed behavior
+
+The similarity report after this pass traced to workspace state rather than inference: selecting a generation set its seed to fixed, and New Image carried that setting into later work. Several stored cat generations therefore used seed `42`; later unrelated test images also shared a carried seed.
+
+Ordinary generation now starts in random-seed mode both after selecting an image and after invoking any New Image action. The explicit Fork/Regenerate paths and manually disabling Random seed still preserve deterministic reproduction. Swift state coverage checks both sides of that contract, and the rebuilt app showed Random seed enabled after opening Generation Settings from a selected image.

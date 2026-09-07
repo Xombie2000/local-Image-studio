@@ -162,7 +162,10 @@ final class StudioStore: ObservableObject {
             height: carried.height,
             steps: carried.steps,
             quantization: carried.quantization,
-            randomSeed: carried.randomSeed,
+            // A fresh canvas should produce a fresh composition by default.
+            // Regenerate and an explicitly disabled Random seed toggle remain
+            // the paths for deterministic reuse of an existing seed.
+            randomSeed: true,
             seed: carried.seed,
             variantCount: carried.variantCount,
             parentId: nil,
@@ -191,7 +194,9 @@ final class StudioStore: ObservableObject {
             height: generation.height,
             steps: generation.steps,
             quantization: generation.quantization,
-            randomSeed: false,
+            // Selecting an image seeds the next ordinary Generate randomly.
+            // Explicit Fork/Regenerate actions below opt back into its exact seed.
+            randomSeed: true,
             seed: generation.seed,
             variantCount: 1,
             parentId: generation.id,
