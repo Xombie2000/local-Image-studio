@@ -192,7 +192,12 @@ struct ProjectRow: View {
     @EnvironmentObject private var store: StudioStore
     let project: ProjectInfo
     @State private var hovered = false
-    private var showsActions: Bool { hovered || store.selectedProjectId == project.id }
+    @State private var newImageHovered = false
+    @State private var deleteHovered = false
+    private var emphasizesActions: Bool { hovered || store.selectedProjectId == project.id }
+    private var actionForeground: Color {
+        emphasizesActions ? Color.secondary : Color.secondary.opacity(0.58)
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -209,11 +214,15 @@ struct ProjectRow: View {
                 if !project.archived {
                     Button { store.newImage(in: project) } label: { Image(systemName: "photo.badge.plus") }
                         .help("New image in \(project.name)").accessibilityLabel("New image in \(project.name)")
+                        .foregroundStyle(newImageHovered ? Color.accentColor : actionForeground)
+                        .onHover { newImageHovered = $0 }
                 }
                 Button(role: .destructive) { store.requestDeleteProject(project) } label: { Image(systemName: "trash") }
                     .help("Delete project \(project.name)").accessibilityLabel("Delete project \(project.name)")
                     .disabled(store.activeJob != nil)
-            }.buttonStyle(.plain).foregroundStyle(.secondary).opacity(showsActions ? 1 : 0)
+                    .foregroundStyle(deleteHovered ? Color.red : actionForeground)
+                    .onHover { deleteHovered = $0 }
+            }.buttonStyle(.plain)
         }
         .padding(.vertical, 5).padding(.horizontal, 6)
         .background(store.selectedProjectId == project.id ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
