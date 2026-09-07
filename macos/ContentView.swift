@@ -136,7 +136,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     DisclosureGroup(isExpanded: $store.projectsExpanded) {
                         VStack(spacing: 2) {
-                            Button { store.selectedProjectId = nil } label: {
+                            Button { store.selectProject(nil) } label: {
                                 Label("All Images", systemImage: "photo.on.rectangle")
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }.buttonStyle(.plain).padding(6)
@@ -194,8 +194,7 @@ struct ProjectRow: View {
 
     var body: some View {
         Button {
-            store.selectedProjectId = project.id
-            if let first = store.generations.first(where: { $0.projectId == project.id }) { store.select(first) }
+            store.selectProject(project.id)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: project.archived ? "archivebox" : "folder")
@@ -628,7 +627,7 @@ struct InspectorView: View {
                         Stepper("Steps: \(store.workspace.steps)", value: $store.workspace.steps, in: 1...100)
                         Toggle("Random seed", isOn: $store.workspace.randomSeed)
                         if !store.workspace.randomSeed { TextField("Seed", value: $store.workspace.seed, format: .number) }
-                        Picker("Project", selection: $store.workspace.projectId) {
+                        Picker("Project", selection: Binding(get: { store.workspace.projectId }, set: { store.chooseDraftProject($0) })) {
                             Text("No Project").tag(nil as String?)
                             ForEach(store.projects.filter { !$0.archived }) { Text($0.name).tag($0.id as String?) }
                         }

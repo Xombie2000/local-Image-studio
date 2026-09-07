@@ -35,8 +35,25 @@ struct StudioStateTests {
             precondition(store.selectedImageModel == "flux2_klein_9b")
             precondition(store.workspace.modelId == "flux2_klein_9b")
             precondition(store.helperModelID == "server/exact-chat-id")
+            store.projects = [project("A"), project("B")]
+            store.generations = [generation("image-A", project: "A")]
+            store.restoreProjectSelection()
+            precondition(store.selectedProjectId == "B" && store.selectedGeneration == nil)
+            precondition(store.workspace.projectId == "B")
+            store.selectProject(nil)
+            defaults.synchronize()
+            let allImages = StudioStore(defaults: defaults)
+            allImages.projects = store.projects
+            allImages.generations = store.generations
+            allImages.restoreProjectSelection()
+            precondition(allImages.selectedProjectId == nil && allImages.selectedGeneration?.id == "image-A")
+            store.selectProject("A")
+            let deletedAtRestart = StudioStore(defaults: defaults)
+            deletedAtRestart.projects = [project("B")]
+            deletedAtRestart.restoreProjectSelection()
+            precondition(deletedAtRestart.selectedProjectId == nil && deletedAtRestart.selectedGeneration == nil)
             defaults.removePersistentDomain(forName: suite)
-            print("PASS: model preferences restored in a separate process")
+            print("PASS: model and project preferences restored in a separate process; All Images and deleted-project recovery")
             return
         }
         defaults.removePersistentDomain(forName: suite)
@@ -57,7 +74,71 @@ struct StudioStateTests {
         precondition(store.promptImprovement && store.helperUnavailable)
         store.newImage()
         precondition(store.workspace.modelId == "flux2_klein_9b")
+        checkProjects(store)
         defaults.synchronize()
         print("PASS: fit geometry, purpose filtering, independent selection and New Image state")
+    }
+
+    static func project(_ id: String) -> ProjectInfo {
+        ProjectInfo(id: id, name: id, archived: false, generationCount: id == "A" ? 1 : 0, createdAt: "", updatedAt: "")
+    }
+
+    static func generation(_ id: String, project: String?) -> Generation {
+        Generation(id: id, parentId: nil, projectId: project, originalPrompt: "cat", improvedPrompt: "cat",
+                   promptImprovementModel: nil, promptImprovementStrength: nil,
+                   promptHelper: PromptHelperMetrics(model: nil, tokensPerSecond: nil, timeToFirstToken: nil, tokenCount: nil, totalTime: nil),
+                   modelId: "flux2_klein_4b", model: "FLUX 4B", quantization: nil, quantizationLabel: "None", seed: 42,
+                   width: 512, height: 512, steps: 4, generationTime: 1, secondsPerImage: 1, stepsPerSecond: 4,
+                   peakMemoryBytes: nil, gpuUtilization: nil, referenceUsed: false, referenceSourceId: nil,
+                   referenceImagePath: nil, loraName: nil, loraScale: nil, variantGroupId: nil, variantIndex: 1,
+                   variantCount: 1, generationGroupId: nil, createdAt: "", imagePath: "/tmp/test.png", thumbnailPath: nil,
+                   filename: "test.png", archived: false, upscaleSourceWidth: 0, upscaleSourceHeight: 0,
+                   upscaleScaleFactor: nil, upscaleModelVariant: nil, upscalePrecision: nil)
+    }
+
+    @MainActor static func checkProjects(_ store: StudioStore) {
+        let a = project("A"), b = project("B")
+        let image = generation("image-A", project: "A")
+        store.projects = [a, b]
+        store.generations = [image]
+        for _ in 0..<3 {
+            store.selectProject("A")
+            precondition(store.selectedGeneration?.projectId == "A")
+            store.selectProject("B")
+            precondition(store.selectedGeneration == nil && store.visibleHistory.isEmpty)
+            precondition(store.workspace.mode == .newImage && store.workspace.projectId == "B")
+            precondition(store.workspace.parentId == nil && store.workspace.referenceGenerationId == nil)
+            store.workspace.originalPrompt = "A military attack drone from 2100"
+            precondition(store.generationPayload()["project_id"] as? String == "B")
+            precondition(store.generationPayload()["parent_id"] == nil)
+        }
+        store.selectProject("A")
+        store.selectProject(nil)
+        precondition(store.selectedProjectId == nil && store.selectedGeneration?.id == image.id)
+        precondition(store.visibleHistory.count == 1)
+        store.newImage()
+        precondition(store.generationPayload()["project_id"] == nil)
+        store.select(image)
+        precondition(store.selectedProjectId == nil) // All Images remains global.
+        store.chooseDraftProject("B")
+        precondition(store.selectedGeneration == nil && store.selectedProjectId == "B")
+        precondition(store.workspace.originalPrompt == "cat" && store.workspace.parentId == nil)
+        store.selectProject("A")
+        store.activateCreatedProject(project("backend-canonical-id"))
+        precondition(store.selectedProjectId == "backend-canonical-id" && store.selectedGeneration == nil)
+        precondition(store.generationPayload()["project_id"] as? String == "backend-canonical-id")
+        store.workspace.originalPrompt = "keep my draft"
+        precondition(!store.validateGenerationDestination(projects: [a, b], generations: [image]))
+        precondition(store.selectedProjectId == nil && store.workspace.projectId == nil)
+        precondition(store.workspace.originalPrompt == "keep my draft" && store.notice != nil)
+        store.selectProject("A")
+        store.projects = [b]
+        store.generations = [generation(image.id, project: nil)]
+        store.reconcileProjectSelection()
+        precondition(store.selectedProjectId == nil && store.selectedGeneration == nil && store.workspace.parentId == nil)
+        store.projects = [a, b]
+        store.selectProject("A")
+        store.selectProject("B") // Empty selection is restored by the next process.
+        print("PASS: A → empty B → A, request destination, creation, deletion, draft target and All Images")
     }
 }

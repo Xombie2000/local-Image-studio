@@ -11,7 +11,9 @@ final class StudioStore: ObservableObject {
     @Published var models: [ModelInfo] = []
     @Published var loras: [LoRAInfo] = []
     @Published var selectedGeneration: Generation?
-    @Published var selectedProjectId: String?
+    @Published private(set) var selectedProjectId: String? {
+        didSet { defaults.set(selectedProjectId ?? "", forKey: "selectedProjectID") }
+    }
     @Published var workspace = WorkspaceState()
     @Published var showInspector = true
     @Published var lastHelperMetrics: PromptHelperMetrics?
@@ -74,6 +76,8 @@ final class StudioStore: ObservableObject {
 
     let backend = BackendController.shared
     private var pollTask: Task<Void, Never>?
+    private var selectionRevision = 0
+    private var preparingGeneration = false
 
     struct ProjectEditor: Identifiable {
         let id = UUID()
@@ -95,7 +99,9 @@ final class StudioStore: ObservableObject {
         self.defaults = defaults
         selectedImageModel = defaults.string(forKey: "generationModelID") ?? "flux2_klein_4b"
         helperModelID = defaults.string(forKey: "promptHelperModelID") ?? ""
+        selectedProjectId = defaults.string(forKey: "selectedProjectID").flatMap { $0.isEmpty ? nil : $0 }
         workspace.modelId = selectedImageModel
+        workspace.projectId = selectedProjectId
     }
 
     func load() async {
@@ -110,15 +116,12 @@ final class StudioStore: ObservableObject {
             promptHelper = bootstrap.promptHelper
             lastHelperMetrics = generations.map(\.promptHelper).first(where: \.hasDisplayMetrics)
             restoreModelPreferences()
+            restoreProjectSelection()
             if let active = bootstrap.activeJob {
                 activeJob = active
                 poll(jobId: active.id)
-            } else if let first = generations.first {
-                select(first)
-                workspace.modelId = selectedImageModel
-            } else {
-                newImage()
             }
+            workspace.modelId = selectedImageModel
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -134,13 +137,12 @@ final class StudioStore: ObservableObject {
             loras = bootstrap.loras
             modelStatus = bootstrap.modelStatus
             promptHelper = bootstrap.promptHelper
-            if let selected = selectedGeneration, let updated = generations.first(where: { $0.id == selected.id }) {
-                selectedGeneration = updated
-            }
+            reconcileProjectSelection()
         } catch { errorMessage = error.localizedDescription }
     }
 
     func newImage() {
+        selectionRevision += 1
         promptImprovementNotice = nil
         let carried = workspace
         selectedGeneration = nil
@@ -169,9 +171,11 @@ final class StudioStore: ObservableObject {
     }
 
     func select(_ generation: Generation) {
+        selectionRevision += 1
         promptImprovementNotice = nil
         selectedGeneration = generation
-        selectedProjectId = generation.projectId
+        // All Images intentionally permits a selection from any project.
+        if selectedProjectId != nil { selectedProjectId = generation.projectId }
         workspace = WorkspaceState(
             mode: .viewing,
             originalPrompt: generation.originalPrompt,
@@ -193,6 +197,90 @@ final class StudioStore: ObservableObject {
             loraId: loras.first(where: { $0.name == generation.loraName })?.id,
             loraScale: generation.loraScale ?? 1
         )
+    }
+
+    func selectProject(_ id: String?) {
+        guard id == nil || projects.contains(where: { $0.id == id }) else {
+            recoverMissingProject()
+            return
+        }
+        selectionRevision += 1
+        selectedProjectId = id
+        if let selected = selectedGeneration,
+           let current = generations.first(where: { $0.id == selected.id }),
+           id == nil || current.projectId == id {
+            select(current)
+        } else if let first = generations.first(where: { id == nil || $0.projectId == id }) {
+            select(first)
+        } else {
+            newImage()
+        }
+    }
+
+    // Generation Settings changes the draft destination through the same active
+    // project state. Preserve the user's prompt, but discard the old image source.
+    func chooseDraftProject(_ id: String?) {
+        guard id == nil || projects.contains(where: { $0.id == id && !$0.archived }) else {
+            recoverMissingProject()
+            return
+        }
+        let prompt = workspace.originalPrompt
+        selectedProjectId = id
+        newImage()
+        workspace.originalPrompt = prompt
+    }
+
+    func restoreProjectSelection() { selectProject(selectedProjectId) }
+
+    private func recoverMissingProject() {
+        let prompt = workspace.originalPrompt
+        selectedProjectId = nil
+        newImage()
+        workspace.originalPrompt = prompt
+        notice = "The selected project is no longer available. Your prompt was kept. Choose a project before generating again."
+    }
+
+    // Called after library reloads, moves, deletion and request preflight. Never
+    // leave an old generation or deleted destination in an active project.
+    func reconcileProjectSelection() {
+        if let id = selectedProjectId, !projects.contains(where: { $0.id == id }) {
+            recoverMissingProject()
+            return
+        }
+        if let selected = selectedGeneration {
+            if let current = generations.first(where: { $0.id == selected.id }),
+               selectedProjectId == nil || current.projectId == selectedProjectId {
+                selectedGeneration = current
+                workspace.projectId = current.projectId
+            } else {
+                let prompt = workspace.originalPrompt
+                newImage()
+                workspace.originalPrompt = prompt
+            }
+        }
+        if let id = workspace.projectId, !projects.contains(where: { $0.id == id }) {
+            recoverMissingProject()
+        } else if let id = selectedProjectId, workspace.projectId != id {
+            chooseDraftProject(id)
+        }
+    }
+
+    // Returns false on disappearance/archival; never silently retarget this click
+    // to All Images. The backend still validates races after this fresh snapshot.
+    func validateGenerationDestination(projects currentProjects: [ProjectInfo], generations currentGenerations: [Generation]) -> Bool {
+        let target = selectedProjectId ?? workspace.projectId
+        projects = currentProjects
+        generations = currentGenerations
+        if let target, !projects.contains(where: { $0.id == target }) {
+            recoverMissingProject()
+            return false
+        }
+        reconcileProjectSelection()
+        if let target, projects.first(where: { $0.id == target })?.archived == true {
+            notice = "Restore the selected project before generating into it. Your prompt was kept."
+            return false
+        }
+        return true
     }
 
     func forkSelected() {
@@ -244,10 +332,31 @@ final class StudioStore: ObservableObject {
     }
 
     func generate() async {
-        guard activeJob == nil else { return }
+        guard activeJob == nil, !preparingGeneration else { return }
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
-        promptImprovementNotice = nil
+        preparingGeneration = true
+        defer { preparingGeneration = false }
+        let revision = selectionRevision
+        do {
+            let snapshot: BootstrapResponse = try await backend.get("/api/bootstrap")
+            guard revision == selectionRevision else { return }
+            guard validateGenerationDestination(projects: snapshot.projects, generations: snapshot.generations) else { return }
+            promptImprovementNotice = nil
+            let job: GenerationJob = try await backend.post("/api/generate", json: generationPayload())
+            activeJob = job
+            poll(jobId: job.id, followSelection: selectionRevision == revision)
+        } catch {
+            if error.localizedDescription == "Project not found." {
+                // A project can disappear between preflight and submission.
+                await refresh()
+                notice = "The destination project disappeared before generation could start. Your prompt was kept; choose a project and try again."
+            } else { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func generationPayload() -> [String: Any] {
+        let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var payload: [String: Any] = [
             "prompt": prompt,
             "model_id": workspace.modelId,
@@ -265,7 +374,7 @@ final class StudioStore: ObservableObject {
             "lora_scale": workspace.loraScale,
         ]
         if let parentId = workspace.parentId { payload["parent_id"] = parentId }
-        if let projectId = workspace.projectId { payload["project_id"] = projectId }
+        if let projectId = selectedProjectId ?? workspace.projectId { payload["project_id"] = projectId }
         if let reference = workspace.referenceGenerationId { payload["reference_generation_id"] = reference }
         if let data = workspace.referenceData { payload["reference_data"] = data }
         if let path = workspace.referencePath { payload["reference_path"] = path }
@@ -273,15 +382,12 @@ final class StudioStore: ObservableObject {
         if !workspace.improvedPrompt.isEmpty && workspace.mode != .newImage {
             payload["improved_prompt_override"] = workspace.improvedPrompt
         }
-        do {
-            let job: GenerationJob = try await backend.post("/api/generate", json: payload)
-            activeJob = job
-            poll(jobId: job.id)
-        } catch { errorMessage = error.localizedDescription }
+        return payload
     }
 
-    private func poll(jobId: String) {
+    private func poll(jobId: String, followSelection: Bool = true) {
         pollTask?.cancel()
+        let revision = selectionRevision
         pollTask = Task {
             while !Task.isCancelled {
                 do {
@@ -289,14 +395,17 @@ final class StudioStore: ObservableObject {
                     let job: GenerationJob = try await backend.get("/api/jobs/\(jobId)")
                     activeJob = job
                     if let status = job.modelStatus { modelStatus = status }
-                    if let original = job.originalPrompt { workspace.originalPrompt = original }
-                    if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
+                    let followsWorkspace = followSelection && revision == selectionRevision
+                    if followsWorkspace {
+                        if let original = job.originalPrompt { workspace.originalPrompt = original }
+                        if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
+                    }
                     if let metrics = job.promptHelper, metrics.hasDisplayMetrics { lastHelperMetrics = metrics }
                     promptImprovementNotice = job.promptNotice
                     if job.state == "complete" {
                         let results = job.generations ?? job.generation.map { [$0] } ?? []
                         generations.insert(contentsOf: results.reversed(), at: 0)
-                        if let first = results.first { select(first) }
+                        if followsWorkspace, let first = results.first { select(first) }
                         // Keep the fallback status visible after selecting the result.
                         promptImprovementNotice = job.promptNotice
                         activeJob = nil
@@ -428,12 +537,19 @@ final class StudioStore: ObservableObject {
                     if let index = projects.firstIndex(where: { $0.id == id }) { projects[index] = project }
                 } else {
                     project = try await backend.post("/api/projects", json: ["name": editor.name])
-                    projects.append(project)
-                    projects.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                    activateCreatedProject(project)
                 }
                 projectEditor = nil
             } catch { errorMessage = error.localizedDescription }
         }
+    }
+
+    func activateCreatedProject(_ project: ProjectInfo) {
+        projects.removeAll { $0.id == project.id }
+        projects.append(project)
+        projects.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // Only invoked with the successfully persisted backend response.
+        selectProject(project.id)
     }
 
     func moveSelected(to projectId: String?) {
@@ -443,9 +559,8 @@ final class StudioStore: ObservableObject {
                 let value: Any = projectId ?? NSNull()
                 let moved: Generation = try await backend.post("/api/generations/\(generation.id)/move", json: ["project_id": value])
                 if let index = generations.firstIndex(where: { $0.id == moved.id }) { generations[index] = moved }
-                selectedGeneration = moved
                 selectedProjectId = projectId
-                workspace.projectId = projectId
+                select(moved)
                 await refreshProjects()
             } catch { errorMessage = error.localizedDescription }
         }
@@ -514,6 +629,8 @@ final class StudioStore: ObservableObject {
         do {
             let bootstrap: BootstrapResponse = try await backend.get("/api/bootstrap")
             projects = bootstrap.projects
+            generations = bootstrap.generations
+            reconcileProjectSelection()
         } catch {}
     }
 
