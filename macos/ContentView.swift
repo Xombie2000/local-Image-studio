@@ -461,6 +461,8 @@ struct ActionBar: View {
     @EnvironmentObject private var store: StudioStore
     var body: some View {
         HStack(spacing: 12) {
+            Button("Copy", systemImage: "doc.on.doc") { store.copyImage() }
+                .help("Copy Image (⌘C)")
             Button("Edit", systemImage: "pencil") { store.editSelected() }
             Button("Variation", systemImage: "dice") { store.variationSelected() }
             Button("Upscale", systemImage: "arrow.up.left.and.arrow.down.right") { store.showUpscaleNotice() }
