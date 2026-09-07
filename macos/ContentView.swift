@@ -242,6 +242,12 @@ struct HistoryRow: View {
     @EnvironmentObject private var store: StudioStore
     let generation: Generation
     @State private var hovered = false
+    @State private var deleteHovered = false
+    private var deleteForeground: Color {
+        hovered || store.selectedGeneration?.id == generation.id
+            ? Color.secondary
+            : Color.secondary.opacity(0.58)
+    }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -278,8 +284,10 @@ struct HistoryRow: View {
         }
         .buttonStyle(.plain)
         Button(role: .destructive) { store.requestDeleteGeneration(generation) } label: { Image(systemName: "trash") }
-            .buttonStyle(.plain).foregroundStyle(.secondary).padding(.trailing, 5)
-            .opacity(hovered || store.selectedGeneration?.id == generation.id ? 1 : 0)
+            .buttonStyle(.plain)
+            .foregroundStyle(deleteHovered ? Color.red : deleteForeground)
+            .padding(.trailing, 5)
+            .onHover { deleteHovered = $0 }
             .disabled(store.activeJob != nil)
             .help("Delete image").accessibilityLabel("Delete image \(generation.filename)")
         }
