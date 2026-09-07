@@ -53,10 +53,11 @@ class ProjectRequestTests(unittest.TestCase):
             with error:
                 return error.code, json.load(error)
 
-    def generate(self, project_id):
+    def generate(self, project_id, **extra):
         payload = {"prompt": "A military attack drone from 2100", "model_id": "flux2_klein_4b",
                    "project_id": project_id, "width": 512, "height": 512, "steps": 4,
                    "prompt_improvement": False, "model_retention": "immediate"}
+        payload.update(extra)
         status, job = self.request("/api/generate", payload)
         self.assertEqual(status, 202, job)
         deadline = time.monotonic() + 10
@@ -92,6 +93,41 @@ class ProjectRequestTests(unittest.TestCase):
 
     def test_all_images_new_generation_has_no_project(self):
         self.assertIsNone(self.generate(None)["project_id"])
+
+    def test_final_editor_prompt_survives_http_and_database_exactly(self):
+        for text in ("  edited enhancement\nNo lettering.  ", "original restored\n", "Helper Off: 日本語"):
+            with self.subTest(prompt=text):
+                generation = self.generate(None, prompt=text, prompt_is_final=True,
+                    prompt_improvement=True, improved_prompt_override="must never be used")
+                self.assertEqual(generation["original_prompt"], text)
+                self.assertEqual(generation["improved_prompt"], text)
+                self.assertIsNone(generation["prompt_helper"]["model"])
+                with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+                    self.assertEqual(connection.execute("SELECT prompt FROM generations WHERE id=?", (generation["id"],)).fetchone(), (text,))
+
+    def test_project_delete_preserves_images_and_image_delete_reattaches_children(self):
+        _, project = self.request("/api/projects", {"name": "Delete Actions"})
+        parent = self.generate(project["id"])
+        child = self.generate(project["id"], parent_id=parent["id"])
+        grandchild = self.generate(project["id"], parent_id=child["id"])
+        self.assertEqual(self.request(f"/api/generations/{child['id']}", method="DELETE")[0], 200)
+        self.assertFalse(Path(child["image_path"]).exists())
+        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+            self.assertEqual(connection.execute("SELECT parent_id FROM generations WHERE id=?", (grandchild["id"],)).fetchone(), (parent["id"],))
+        self.assertEqual(self.request(f"/api/projects/{project['id']}", method="DELETE")[0], 200)
+        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+            for generation in (parent, grandchild):
+                row = connection.execute("SELECT project_id,image_path FROM generations WHERE id=?", (generation["id"],)).fetchone()
+                self.assertIsNone(row[0])
+                self.assertTrue(Path(row[1]).is_file())
+
+    def test_unavailable_enhance_returns_prompt_without_generation(self):
+        status, result = self.request("/api/prompt/enhance", {"prompt": "unchanged draft", "model_id": "off"})
+        self.assertEqual(status, 200)
+        self.assertFalse(result["enhanced"])
+        self.assertEqual(result["prompt"], "unchanged draft")
+        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM generations WHERE original_prompt=?", ("unchanged draft",)).fetchone(), (0,))
 
 
 if __name__ == "__main__":

@@ -16,7 +16,15 @@ final class StudioStore: ObservableObject {
     }
     @Published var workspace = WorkspaceState()
     @Published var showInspector = true
-    @Published var lastHelperMetrics: PromptHelperMetrics?
+    @Published var lastHelperMetrics: PromptHelperMetrics? {
+        didSet {
+            defaults.set(lastHelperMetrics.flatMap { try? JSONEncoder().encode($0) }, forKey: "lastEnhanceMetrics")
+        }
+    }
+    @Published private(set) var preEnhancementPrompt: String?
+    @Published private(set) var isEnhanced = false
+    @Published private(set) var isEnhancing = false
+    @Published private(set) var promptFocusRequest = 0
     @Published var selectedImageModel: String {
         didSet { defaults.set(selectedImageModel, forKey: "generationModelID") }
     }
@@ -36,7 +44,6 @@ final class StudioStore: ObservableObject {
         helperModelID = id
         promptImprovement = id != "off"
         promptImprovementNotice = nil
-        workspace.improvedPrompt = ""
     }
 
     private func restoreModelPreferences() {
@@ -54,7 +61,6 @@ final class StudioStore: ObservableObject {
     @Published var promptImprovementNotice: String?
     @Published var showModels = false
     @Published var showUpscaleSheet = false
-    @Published var showImprovedPrompt = false
     @Published var showAdvanced = false
     @Published var projectsExpanded = true
     @Published var historyExpanded = true
@@ -100,6 +106,7 @@ final class StudioStore: ObservableObject {
         selectedImageModel = defaults.string(forKey: "generationModelID") ?? "flux2_klein_4b"
         helperModelID = defaults.string(forKey: "promptHelperModelID") ?? ""
         selectedProjectId = defaults.string(forKey: "selectedProjectID").flatMap { $0.isEmpty ? nil : $0 }
+        lastHelperMetrics = defaults.data(forKey: "lastEnhanceMetrics").flatMap { try? JSONDecoder().decode(PromptHelperMetrics.self, from: $0) }
         workspace.modelId = selectedImageModel
         workspace.projectId = selectedProjectId
     }
@@ -114,7 +121,6 @@ final class StudioStore: ObservableObject {
             loras = bootstrap.loras
             modelStatus = bootstrap.modelStatus
             promptHelper = bootstrap.promptHelper
-            lastHelperMetrics = generations.map(\.promptHelper).first(where: \.hasDisplayMetrics)
             restoreModelPreferences()
             restoreProjectSelection()
             if let active = bootstrap.activeJob {
@@ -143,13 +149,14 @@ final class StudioStore: ObservableObject {
 
     func newImage() {
         selectionRevision += 1
+        clearEnhancement()
+        promptFocusRequest += 1
         promptImprovementNotice = nil
         let carried = workspace
         selectedGeneration = nil
         workspace = WorkspaceState(
             mode: .newImage,
             originalPrompt: "",
-            improvedPrompt: "",
             modelId: selectedImageModel,
             width: carried.width,
             height: carried.height,
@@ -167,11 +174,11 @@ final class StudioStore: ObservableObject {
             loraId: carried.loraId,
             loraScale: carried.loraScale
         )
-        showImprovedPrompt = false
     }
 
     func select(_ generation: Generation) {
         selectionRevision += 1
+        clearEnhancement()
         promptImprovementNotice = nil
         selectedGeneration = generation
         // All Images intentionally permits a selection from any project.
@@ -179,7 +186,6 @@ final class StudioStore: ObservableObject {
         workspace = WorkspaceState(
             mode: .viewing,
             originalPrompt: generation.originalPrompt,
-            improvedPrompt: generation.improvedPrompt,
             modelId: generation.isUpscale ? selectedImageModel : generation.modelId,
             width: generation.width,
             height: generation.height,
@@ -231,6 +237,63 @@ final class StudioStore: ObservableObject {
     }
 
     func restoreProjectSelection() { selectProject(selectedProjectId) }
+
+    func newImage(in project: ProjectInfo) {
+        guard let current = projects.first(where: { $0.id == project.id }), !current.archived else { return }
+        selectedProjectId = current.id
+        newImage()
+    }
+
+    private func clearEnhancement() {
+        preEnhancementPrompt = nil
+        isEnhanced = false
+        promptImprovementNotice = nil
+    }
+
+    func enhancePrompt() async {
+        guard activeJob == nil, !preparingGeneration, !isEnhancing, helperModelID != "off", !helperModelID.isEmpty else { return }
+        let original = workspace.originalPrompt
+        guard !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let revision = selectionRevision
+        isEnhancing = true
+        promptImprovementNotice = nil
+        defer { isEnhancing = false }
+        do {
+            let response: PromptEnhancementResponse = try await backend.post("/api/prompt/enhance", json: [
+                "prompt": original, "model_id": helperModelID, "strength": promptStrength
+            ])
+            lastHelperMetrics = response.promptHelper.hasDisplayMetrics ? response.promptHelper : nil
+            guard revision == selectionRevision else { return }
+            guard workspace.originalPrompt == original else {
+                promptImprovementNotice = "Your prompt changed while enhancing. It was kept; click Enhance to try again."
+                return
+            }
+            applyEnhancement(response, original: original)
+        } catch {
+            lastHelperMetrics = nil
+            guard revision == selectionRevision else { return }
+            promptImprovementNotice = "Enhancement failed: \(error.localizedDescription) Your prompt was kept; you can retry or Generate."
+        }
+    }
+
+    func applyEnhancement(_ response: PromptEnhancementResponse, original: String) {
+        guard response.enhanced else {
+            promptImprovementNotice = response.notice ?? "Enhancement unavailable. Your prompt was kept; you can retry or Generate."
+            return
+        }
+        preEnhancementPrompt = original
+        workspace.originalPrompt = response.prompt
+        isEnhanced = true
+        promptImprovementNotice = nil
+        promptFocusRequest += 1
+    }
+
+    func revertPrompt() {
+        guard let original = preEnhancementPrompt else { return }
+        workspace.originalPrompt = original
+        clearEnhancement()
+        promptFocusRequest += 1
+    }
 
     private func recoverMissingProject() {
         let prompt = workspace.originalPrompt
@@ -305,7 +368,6 @@ final class StudioStore: ObservableObject {
         workspace.referenceGenerationId = generation.id
         workspace.referenceName = generation.filename
         workspace.originalPrompt = ""
-        workspace.improvedPrompt = ""
         workspace.randomSeed = true
         showInspector = true
     }
@@ -327,12 +389,11 @@ final class StudioStore: ObservableObject {
         workspace.mode = .fork
         workspace.parentId = generation.id
         workspace.randomSeed = true
-        workspace.improvedPrompt = generation.improvedPrompt
         Task { await generate() }
     }
 
     func generate() async {
-        guard activeJob == nil, !preparingGeneration else { return }
+        guard activeJob == nil, !preparingGeneration, !isEnhancing else { return }
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
         preparingGeneration = true
@@ -356,7 +417,7 @@ final class StudioStore: ObservableObject {
     }
 
     func generationPayload() -> [String: Any] {
-        let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = workspace.originalPrompt
         var payload: [String: Any] = [
             "prompt": prompt,
             "model_id": workspace.modelId,
@@ -367,7 +428,8 @@ final class StudioStore: ObservableObject {
             "random_seed": workspace.randomSeed,
             "seed": workspace.seed,
             "variant_count": workspace.variantCount,
-            "prompt_improvement": promptImprovement && helperModelID != "off",
+            "prompt_is_final": true,
+            "prompt_improvement": false,
             "prompt_helper_model": helperModelID.isEmpty ? "off" : helperModelID,
             "prompt_improvement_strength": promptStrength,
             "model_retention": modelRetention,
@@ -379,9 +441,6 @@ final class StudioStore: ObservableObject {
         if let data = workspace.referenceData { payload["reference_data"] = data }
         if let path = workspace.referencePath { payload["reference_path"] = path }
         if let lora = workspace.loraId { payload["lora_id"] = lora }
-        if !workspace.improvedPrompt.isEmpty && workspace.mode != .newImage {
-            payload["improved_prompt_override"] = workspace.improvedPrompt
-        }
         return payload
     }
 
@@ -398,9 +457,7 @@ final class StudioStore: ObservableObject {
                     let followsWorkspace = followSelection && revision == selectionRevision
                     if followsWorkspace {
                         if let original = job.originalPrompt { workspace.originalPrompt = original }
-                        if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
                     }
-                    if let metrics = job.promptHelper, metrics.hasDisplayMetrics { lastHelperMetrics = metrics }
                     promptImprovementNotice = job.promptNotice
                     if job.state == "complete" {
                         let results = job.generations ?? job.generation.map { [$0] } ?? []
@@ -505,11 +562,11 @@ final class StudioStore: ObservableObject {
         }
     }
 
-    func requestDeleteGeneration() {
-        guard let generation = selectedGeneration else { return }
+    func requestDeleteGeneration(_ target: Generation? = nil) {
+        guard activeJob == nil, let generation = target ?? selectedGeneration else { return }
         confirmation = Confirmation(
-            title: "Delete Generation?",
-            message: "This removes the image file and metadata. Forks remain and are reattached to the deleted image’s parent.",
+            title: "Delete Image?",
+            message: "Delete “\(generation.originalPrompt.prefix(100))”? This removes its image file and metadata. Child images remain and are reattached to its parent.",
             destructive: true
         ) { [weak self] in self?.deleteGeneration(generation) }
     }
@@ -519,8 +576,11 @@ final class StudioStore: ObservableObject {
             do {
                 let _: OKResponse = try await backend.delete("/api/generations/\(generation.id)")
                 generations.removeAll { $0.id == generation.id }
-                selectedGeneration = nil
-                newImage()
+                if selectedGeneration?.id == generation.id || workspace.parentId == generation.id || workspace.referenceGenerationId == generation.id {
+                    newImage()
+                }
+                // Reload the backend's reattached lineage and project counts.
+                await refresh()
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -578,9 +638,10 @@ final class StudioStore: ObservableObject {
     }
 
     func requestDeleteProject(_ project: ProjectInfo) {
+        guard activeJob == nil, let project = projects.first(where: { $0.id == project.id }) else { return }
         confirmation = Confirmation(
-            title: "Delete Project?",
-            message: "The project container will be removed. Its generations and image files will be kept in the main Local Image Studio folder.",
+            title: "Delete “\(project.name)”?",
+            message: "This removes the project container. Its \(project.generationCount) image\(project.generationCount == 1 ? "" : "s") will be kept in All Images and the main Local Image Studio folder.",
             destructive: true
         ) { [weak self] in self?.deleteProject(project) }
     }
@@ -590,6 +651,10 @@ final class StudioStore: ObservableObject {
             do {
                 let _: OKResponse = try await backend.delete("/api/projects/\(project.id)")
                 projects.removeAll { $0.id == project.id }
+                if selectedProjectId == project.id || selectedGeneration?.projectId == project.id || workspace.projectId == project.id {
+                    selectedProjectId = nil
+                    newImage()
+                }
                 await refresh()
             } catch { errorMessage = error.localizedDescription }
         }

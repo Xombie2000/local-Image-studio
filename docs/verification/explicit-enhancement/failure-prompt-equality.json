@@ -1,0 +1,11 @@
+{
+  "case": "failure",
+  "generation_id": "eac4793f-bca9-490f-a877-7bb3a2b64c1b",
+  "project_id": null,
+  "parent_id": null,
+  "visible_prompt": "A paper sailboat on still water",
+  "backend_original_prompt": "A paper sailboat on still water",
+  "backend_effective_prompt": "A paper sailboat on still water",
+  "helper_model_at_generation": null,
+  "sqlite_equality": true
+}

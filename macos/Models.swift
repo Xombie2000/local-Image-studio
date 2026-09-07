@@ -32,6 +32,13 @@ struct PromptHelperMetrics: Codable, Hashable {
     let totalTime: Double?
 }
 
+struct PromptEnhancementResponse: Codable {
+    let prompt: String
+    let enhanced: Bool
+    let notice: String?
+    let promptHelper: PromptHelperMetrics
+}
+
 struct Generation: Codable, Identifiable, Hashable {
     let id: String
     let parentId: String?
@@ -187,7 +194,6 @@ enum WorkspaceMode: String {
 struct WorkspaceState {
     var mode: WorkspaceMode = .newImage
     var originalPrompt = ""
-    var improvedPrompt = ""
     var modelId = "flux2_klein_4b"
     var width = 1024
     var height = 1024

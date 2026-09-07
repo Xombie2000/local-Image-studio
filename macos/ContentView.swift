@@ -191,24 +191,35 @@ struct SidebarSectionLabel: View {
 struct ProjectRow: View {
     @EnvironmentObject private var store: StudioStore
     let project: ProjectInfo
+    @State private var hovered = false
+    private var showsActions: Bool { hovered || store.selectedProjectId == project.id }
 
     var body: some View {
-        Button {
-            store.selectProject(project.id)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: project.archived ? "archivebox" : "folder")
-                    .foregroundStyle(project.archived ? .secondary : Color.accentColor)
-                Text(project.name).lineLimit(1)
-                Spacer()
-                Text("\(project.generationCount)").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .padding(.vertical, 5)
-            .padding(.horizontal, 6)
-            .background(store.selectedProjectId == project.id ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 6) {
+            Button { store.selectProject(project.id) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: project.archived ? "archivebox" : "folder")
+                        .foregroundStyle(project.archived ? .secondary : Color.accentColor)
+                    Text(project.name).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("\(project.generationCount)").font(.caption2).foregroundStyle(.tertiary)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            HStack(spacing: 6) {
+                if !project.archived {
+                    Button { store.newImage(in: project) } label: { Image(systemName: "photo.badge.plus") }
+                        .help("New image in \(project.name)").accessibilityLabel("New image in \(project.name)")
+                }
+                Button(role: .destructive) { store.requestDeleteProject(project) } label: { Image(systemName: "trash") }
+                    .help("Delete project \(project.name)").accessibilityLabel("Delete project \(project.name)")
+                    .disabled(store.activeJob != nil)
+            }.buttonStyle(.plain).foregroundStyle(.secondary).opacity(showsActions ? 1 : 0)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 5).padding(.horizontal, 6)
+        .background(store.selectedProjectId == project.id ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .onHover { hovered = $0 }
         .contextMenu {
+            if !project.archived { Button("New Image") { store.newImage(in: project) } }
             Button("Rename…") { store.editProject(project) }.disabled(project.archived)
             Button(project.archived ? "Restore Project" : "Archive Project") { store.archiveOrRestore(project) }
             Button("Reveal in Finder") { store.revealProject(project) }
@@ -221,8 +232,10 @@ struct ProjectRow: View {
 struct HistoryRow: View {
     @EnvironmentObject private var store: StudioStore
     let generation: Generation
+    @State private var hovered = false
 
     var body: some View {
+        HStack(spacing: 3) {
         Button { store.select(generation) } label: {
             HStack(spacing: 8) {
                 if store.treeDepth(for: generation) > 0 {
@@ -253,9 +266,16 @@ struct HistoryRow: View {
             }
             .padding(5)
             .padding(.leading, CGFloat(store.treeDepth(for: generation)) * 7)
-            .background(store.selectedGeneration?.id == generation.id ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
+        Button(role: .destructive) { store.requestDeleteGeneration(generation) } label: { Image(systemName: "trash") }
+            .buttonStyle(.plain).foregroundStyle(.secondary).padding(.trailing, 5)
+            .opacity(hovered || store.selectedGeneration?.id == generation.id ? 1 : 0)
+            .disabled(store.activeJob != nil)
+            .help("Delete image").accessibilityLabel("Delete image \(generation.filename)")
+        }
+        .background(store.selectedGeneration?.id == generation.id ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .onHover { hovered = $0 }
         .contextMenu {
             Button("Open") { store.select(generation) }
             Button("Fork") { store.select(generation); store.forkSelected() }
@@ -269,7 +289,7 @@ struct HistoryRow: View {
             }
             Button("Reveal in Finder") { store.select(generation); store.revealImage() }
             Divider()
-            Button("Delete…", role: .destructive) { store.select(generation); store.requestDeleteGeneration() }
+            Button("Delete…", role: .destructive) { store.requestDeleteGeneration(generation) }
         }
     }
 }
@@ -462,6 +482,10 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(store.workspace.mode == .edit ? "Describe your changes" : "Prompt").font(.headline)
+                if store.isEnhanced {
+                    Text("Enhanced · Review or edit").font(.caption).foregroundStyle(.secondary)
+                    Button("Revert to Original") { store.revertPrompt() }.buttonStyle(.borderless).controlSize(.small)
+                }
                 if let name = store.workspace.referenceName {
                     Label(name, systemImage: "paperclip").lineLimit(1).font(.caption).foregroundStyle(.secondary)
                     Button { store.clearReference() } label: { Image(systemName: "xmark.circle") }
@@ -471,33 +495,39 @@ struct ComposerView: View {
                 Button { store.chooseReferenceImage() } label: { Image(systemName: "paperclip") }
                     .help("Attach reference image").accessibilityLabel("Attach reference image")
             }
-            TextEditor(text: Binding(get: { store.workspace.originalPrompt }, set: { store.workspace.originalPrompt = $0; store.workspace.improvedPrompt = "" }))
+            TextEditor(text: $store.workspace.originalPrompt)
                 .font(.body).scrollContentBackground(.hidden)
                 .frame(height: promptHeight).padding(3)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
                 .focused($promptFocused).accessibilityLabel("Image prompt")
                 .disabled(store.activeJob != nil)
             HStack(spacing: 10) {
-                HelperPicker().frame(maxWidth: 330).disabled(store.activeJob != nil)
+                HelperPicker().frame(maxWidth: 280).disabled(store.activeJob != nil || store.isEnhancing)
+                Button { Task { await store.enhancePrompt() } } label: {
+                    HStack(spacing: 4) {
+                        if store.isEnhancing { ProgressView().controlSize(.mini) }
+                        else { Image(systemName: "sparkles") }
+                        Text(store.isEnhancing ? "Enhancing…" : "Enhance")
+                    }
+                }
+                .help("Enhance the visible prompt, then review or edit before generating")
+                .disabled(store.activeJob != nil || store.isEnhancing || store.helperModelID == "off" || store.helperModelID.isEmpty || store.workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Menu {
                     Picker("Strength", selection: Binding(get: { store.promptStrength }, set: { store.promptStrength = $0 })) {
                         Text("Light").tag("light"); Text("Normal").tag("normal"); Text("Strong").tag("strong")
                     }
                     Button("Refresh Models") { Task { await store.refresh() } }
-                    if !store.workspace.improvedPrompt.isEmpty {
-                        Button("Review Improved Prompt…") { store.showImprovedPrompt = true }
-                    }
                 } label: { Image(systemName: "slider.horizontal.3") }
                 .fixedSize().menuStyle(.borderlessButton).accessibilityLabel("Prompt helper options").help("Prompt helper options")
                 if let metrics = store.lastHelperMetrics {
                     HelperMetricsLabel(metrics: metrics)
                 } else if store.helperUnavailable {
-                    Text("Helper unavailable; original prompt will be used").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text("Helper unavailable; Generate uses your prompt").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 0)
-                Button("Generate", systemImage: "sparkles") { Task { await store.generate() } }
+                Button("Generate", systemImage: "photo") { Task { await store.generate() } }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
-                    .disabled(store.activeJob != nil || store.workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(store.activeJob != nil || store.isEnhancing || store.workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .controlSize(.small)
             if let notice = store.notice {
@@ -510,7 +540,7 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 8).background(.bar)
         .overlay(alignment: .top) { Divider() }
-        .sheet(isPresented: $store.showImprovedPrompt) { ImprovedPromptSheet() }
+        .onChange(of: store.promptFocusRequest) { _ in promptFocused = true }
         .task(id: store.notice) {
             guard store.notice != nil else { return }
             do { try await Task.sleep(nanoseconds: 5_000_000_000); store.notice = nil }
@@ -544,21 +574,6 @@ struct HelperMetricsLabel: View {
                 .help("\(metrics.model!) — throughput is output tokens divided by total request latency.")
                 .accessibilityIdentifier("promptHelperPerformance")
         }
-    }
-}
-
-struct ImprovedPromptSheet: View {
-    @EnvironmentObject private var store: StudioStore
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Review Prompt").font(.title2)
-            Text("Original").font(.headline)
-            Text(store.workspace.originalPrompt).textSelection(.enabled)
-            Text("Improved").font(.headline)
-            TextEditor(text: $store.workspace.improvedPrompt).frame(height: 160)
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(20).frame(width: 540)
     }
 }
 

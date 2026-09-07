@@ -74,6 +74,7 @@ struct StudioStateTests {
         precondition(store.promptImprovement && store.helperUnavailable)
         store.newImage()
         precondition(store.workspace.modelId == "flux2_klein_9b")
+        checkEnhancement(store)
         checkProjects(store)
         defaults.synchronize()
         print("PASS: fit geometry, purpose filtering, independent selection and New Image state")
@@ -124,6 +125,10 @@ struct StudioStateTests {
         precondition(store.selectedGeneration == nil && store.selectedProjectId == "B")
         precondition(store.workspace.originalPrompt == "cat" && store.workspace.parentId == nil)
         store.selectProject("A")
+        store.newImage(in: b)
+        precondition(store.selectedProjectId == "B" && store.selectedGeneration == nil)
+        precondition(store.workspace.projectId == "B" && store.workspace.parentId == nil)
+        store.selectProject("A")
         store.activateCreatedProject(project("backend-canonical-id"))
         precondition(store.selectedProjectId == "backend-canonical-id" && store.selectedGeneration == nil)
         precondition(store.generationPayload()["project_id"] as? String == "backend-canonical-id")
@@ -140,5 +145,56 @@ struct StudioStateTests {
         store.selectProject("A")
         store.selectProject("B") // Empty selection is restored by the next process.
         print("PASS: A → empty B → A, request destination, creation, deletion, draft target and All Images")
+    }
+
+    @MainActor static func checkEnhancement(_ store: StudioStore) {
+        let raw = "  a cat sitting on a fence\nKeep punctuation: 日本語.  "
+        let metrics = PromptHelperMetrics(model: "exact-helper-id", tokensPerSecond: 20, timeToFirstToken: nil, tokenCount: 40, totalTime: 2)
+        let success = PromptEnhancementResponse(prompt: "A cat on a weathered fence.", enhanced: true, notice: nil, promptHelper: metrics)
+        let failure = PromptEnhancementResponse(prompt: "must not replace editor", enhanced: false, notice: "Helper unavailable", promptHelper: metrics)
+        func checkPayload(_ text: String) {
+            let payload = store.generationPayload()
+            precondition(payload["prompt"] as? String == text)
+            precondition(payload["prompt_improvement"] as? Bool == false)
+            precondition(payload["prompt_is_final"] as? Bool == true)
+            precondition(payload["improved_prompt_override"] == nil)
+        }
+        store.workspace.originalPrompt = raw
+        checkPayload(raw)
+        store.applyEnhancement(success, original: raw)
+        precondition(store.workspace.originalPrompt == success.prompt && store.preEnhancementPrompt == raw && store.isEnhanced)
+        precondition(store.activeJob == nil)
+        checkPayload(success.prompt)
+        store.workspace.originalPrompt += "\nNo lettering.  "
+        checkPayload(store.workspace.originalPrompt)
+        store.revertPrompt()
+        precondition(store.workspace.originalPrompt == raw && store.preEnhancementPrompt == nil && !store.isEnhanced)
+        checkPayload(raw)
+        store.applyEnhancement(failure, original: raw)
+        precondition(store.workspace.originalPrompt == raw && store.errorMessage == nil && store.promptImprovementNotice != nil)
+        checkPayload(raw)
+        store.chooseHelper("off")
+        checkPayload(raw)
+        store.chooseHelper("server/exact-chat-id")
+        store.applyEnhancement(success, original: raw)
+        let secondOriginal = store.workspace.originalPrompt + " manually edited"
+        store.workspace.originalPrompt = secondOriginal
+        store.applyEnhancement(success, original: secondOriginal)
+        store.revertPrompt()
+        precondition(store.workspace.originalPrompt == secondOriginal)
+        store.applyEnhancement(success, original: secondOriginal)
+        store.newImage()
+        precondition(store.preEnhancementPrompt == nil && !store.isEnhanced)
+        store.applyEnhancement(success, original: "another original")
+        store.select(generation("image", project: nil))
+        precondition(store.preEnhancementPrompt == nil && !store.isEnhanced)
+        store.projects = [project("temporary")]
+        store.applyEnhancement(success, original: "old project")
+        store.selectProject("temporary")
+        precondition(store.preEnhancementPrompt == nil && !store.isEnhanced)
+        store.selectProject(nil)
+        store.projects = []
+        store.newImage()
+        print("PASS: exact visible prompt payload, enhance/edit/revert/Off/failure, repeated Enhance, and workspace isolation")
     }
 }

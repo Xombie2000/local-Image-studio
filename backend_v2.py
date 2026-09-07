@@ -647,6 +647,35 @@ class LMStudioPromptHelper(PromptHelper):
 PROMPT_HELPER = LMStudioPromptHelper()
 
 
+def enhance_prompt(payload: dict[str, Any]) -> dict[str, Any]:
+    """Optional editor operation; never starts an image job or writes history."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Enter a prompt before enhancing.")
+    if len(prompt) > 10_000:
+        raise ValueError("The prompt is too long (10,000 character maximum).")
+    model_id = str(payload.get("model_id") or "off")
+    strength = str(payload.get("strength", "normal"))
+    if strength not in {"light", "normal", "strong"}:
+        strength = "normal"
+    try:
+        result = PROMPT_HELPER.improve(prompt, strength, model_id=model_id)
+    except Exception as error:
+        print(f"Prompt enhancement failed: {type(error).__name__}", file=sys.stderr)
+        result = PromptHelperResult(prompt, notice="Prompt enhancement unavailable. Your prompt was kept; you can retry or Generate.")
+    enhanced = result.model is not None and result.notice is None
+    return {
+        "prompt": result.prompt if enhanced else prompt,
+        "enhanced": enhanced,
+        "notice": result.notice if enhanced else "Prompt enhancement unavailable. Your prompt was kept; you can retry or Generate.",
+        "prompt_helper": {
+            "model": result.model, "tokens_per_second": result.tokens_per_second,
+            "time_to_first_token": result.ttft, "token_count": result.token_count,
+            "total_time": result.total_time,
+        },
+    }
+
+
 class PersistentWorker:
     def __init__(self):
         self.process: subprocess.Popen[str] | None = None
@@ -1090,6 +1119,14 @@ def schedule_retention(mode: str) -> None:
 
 def validate_v2_payload(payload: dict[str, Any]) -> dict[str, Any]:
     config = v1.validate_generation_payload(payload)
+    # The native editor is authoritative in the explicit Enhance workflow.
+    # Keep legacy API behavior for callers that have not opted into this contract.
+    prompt_is_final = payload.get("prompt_is_final") is True
+    if prompt_is_final:
+        raw_prompt = payload.get("prompt")
+        if not isinstance(raw_prompt, str) or len(raw_prompt) > 10_000:
+            raise ValueError("The prompt must be text of at most 10,000 characters.")
+        config["prompt"] = raw_prompt
     variant_count = v1.validate_integer(payload.get("variant_count", 1), "Variant count", 1, 4)
     if variant_count not in (1, 2, 4):
         raise ValueError("Variant count must be 1, 2, or 4.")
@@ -1123,10 +1160,10 @@ def validate_v2_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "variant_count": variant_count,
             "parent_id": parent_id,
             "project_id": project_id,
-            "prompt_improvement": bool(payload.get("prompt_improvement", True)),
+            "prompt_improvement": False if prompt_is_final else bool(payload.get("prompt_improvement", True)),
             "prompt_improvement_strength": strength,
             "prompt_helper_model": str(payload["prompt_helper_model"]) if payload.get("prompt_helper_model") is not None else None,
-            "improved_prompt_override": str(payload.get("improved_prompt_override") or "").strip() or None,
+            "improved_prompt_override": None if prompt_is_final else str(payload.get("improved_prompt_override") or "").strip() or None,
             "model_retention": retention,
             "reference_path": persistent_reference,
         }
@@ -1482,6 +1519,9 @@ class V2Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         try:
             payload = self.read_json()
+            if path == "/api/prompt/enhance":
+                self.send_json(enhance_prompt(payload))
+                return
             if path == "/api/models/seedvr2_7b/install":
                 with _SEEDVR2_INSTALL_LOCK:
                     if seedvr2_is_installed():

@@ -1,0 +1,11 @@
+{
+  "case": "off",
+  "generation_id": "05896882-0fe4-42e7-aa59-4fe47ce314b4",
+  "project_id": "e6991a53-3dc7-41d0-8dcb-426438f33550",
+  "parent_id": null,
+  "visible_prompt": "A blue ceramic teacup on a wooden table",
+  "backend_original_prompt": "A blue ceramic teacup on a wooden table",
+  "backend_effective_prompt": "A blue ceramic teacup on a wooden table",
+  "helper_model_at_generation": null,
+  "sqlite_equality": true
+}
