@@ -525,7 +525,47 @@ def history(limit: int = 500) -> list[dict[str, Any]]:
     return [public_generation(row) for row in rows]
 
 
-PROMPT_HELPER_SYSTEM = """You improve prompts for an image-generation model. Preserve every explicit constraint, proper name, number, count, and negative requirement exactly. Add useful visual specificity, composition, materials, lighting, camera or art-direction terms only when they support the request. Never creatively replace the user's concept. Never remove technical requirements such as 'exactly eight wheels'. Avoid unnecessary verbosity. Return only the improved prompt, with no preamble or commentary."""
+PROMPT_HELPER_SYSTEM = """The user's prompt is authoritative.
+
+Do not introduce any new objects, characters, weapons, mechanical features, counts, colors, locations, weather, story elements, functions, technologies, or negative requirements unless the user already implied or specified them.
+
+You may improve only clarity, visual detail of already-mentioned subjects, material realism in generic terms, lighting, composition, camera framing, texture, and art/rendering style.
+
+The prohibited categories take precedence over the permitted improvements. If an improvement would add something from the prohibited list, omit it. Before returning, silently compare the enhancement with the original and remove anything the user did not imply or specify.
+
+Never invent exact counts.
+
+Never turn a short prompt into a detailed creative concept. For short prompts, keep the enhanced version under roughly 2–3x the original semantic detail and normally under 60 words.
+
+Return only the enhanced prompt."""
+
+
+PROMPT_NUMBER_WORDS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+    "seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion"
+).split()
+
+
+def authoritative_prompt_clauses(prompt: str) -> list[str]:
+    """Return user clauses whose exact meaning must never be weakened or expanded."""
+    clauses: list[str] = []
+    for pattern in (r"\bexactly\b[^,.;\n]*", r"\b(?:no|without)\b[^,.;\n]*"):
+        clauses.extend(match.group(0).strip() for match in re.finditer(pattern, prompt, re.IGNORECASE))
+    return list(dict.fromkeys(clause for clause in clauses if clause))
+
+
+def prompt_preserves_authority(original: str, enhanced: str) -> bool:
+    normalized_enhanced = re.sub(r"\s+", " ", enhanced).casefold()
+    if any(re.sub(r"\s+", " ", clause).casefold() not in normalized_enhanced
+           for clause in authoritative_prompt_clauses(original)):
+        return False
+    number_pattern = rf"\b(?:\d+(?:\.\d+)?|{'|'.join(PROMPT_NUMBER_WORDS)})\b"
+    original_numbers = sorted(re.findall(number_pattern, original.casefold()))
+    enhanced_numbers = sorted(re.findall(number_pattern, enhanced.casefold()))
+    negative_pattern = r"\b(?:no|without|avoid|exclude|excluding)\b"
+    original_negatives = sorted(re.findall(negative_pattern, original.casefold()))
+    enhanced_negatives = sorted(re.findall(negative_pattern, enhanced.casefold()))
+    return original_numbers == enhanced_numbers and original_negatives == enhanced_negatives
 
 
 class PromptHelperResult:
@@ -601,10 +641,17 @@ class LMStudioPromptHelper(PromptHelper):
         if not model:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
         instruction = {
-            "light": "Make only light refinements and stay concise.",
-            "normal": "Add a moderate amount of useful visual detail.",
-            "strong": "Add strong visual direction while preserving every constraint.",
-        }.get(strength, "Add a moderate amount of useful visual detail.")
+            "light": "Make only light refinements. Stay very close to the original wording and meaning.",
+            "normal": "Make a concise enhancement using only the original subject matter and the permitted presentation categories. Add no named details, parts, or surroundings.",
+            "strong": "Emphasize permitted composition, lighting, texture, and rendering style without adding or elaborating any subject matter. Keep a short prompt under 60 words.",
+        }.get(strength, "Make a concise enhancement using only the original subject matter and the permitted presentation categories. Add no named details, parts, or surroundings.")
+        original_word_count = max(1, len(re.findall(r"\S+", prompt)))
+        short_prompt_limit = min(60, max(12, original_word_count * 3)) if original_word_count <= 30 else None
+        if short_prompt_limit is not None:
+            instruction += f" This is a short prompt. Return one sentence of at most {short_prompt_limit} words."
+        clauses = authoritative_prompt_clauses(prompt)
+        if clauses:
+            instruction += f" Copy these authoritative clauses verbatim: {json.dumps(clauses, ensure_ascii=False)}."
         payload = {
             "model": model,
             "messages": [
@@ -636,6 +683,10 @@ class LMStudioPromptHelper(PromptHelper):
             if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
                 raise ValueError("Empty, invalid, or truncated helper response")
             improved = content.strip()
+            if short_prompt_limit is not None and len(re.findall(r"\S+", improved)) > short_prompt_limit:
+                raise ValueError("Over-expanded helper response")
+            if not prompt_preserves_authority(prompt, improved):
+                raise ValueError("Helper response changed an authoritative constraint")
             usage = result.get("usage") or {}
             tokens = usage.get("completion_tokens")
             tokens_per_second = (float(tokens) / total) if tokens else None

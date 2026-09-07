@@ -19,15 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backend_v2 as backend
 
 MODEL = "qwen3.6-35b-a3b-mlx"
+LIVE_MODEL = "qwen/qwen3-4b-2507"
 CAT = "a cat sitting on a fence"
 VEHICLE = "A futuristic armored vehicle with exactly eight wheels, matte black bodywork, no visible weapons, parked in Tokyo at night"
-# Captured from the actual local Qwen acceptance run, not an invented model reply.
+# Compliant helper reply used to exercise response handling without creative expansion.
 VEHICLE_RESULT = (
-    VEHICLE + ". The vehicle features angular composite armor panels with subtle LED "
-    "accent lighting along the chassis seams, resting on wet asphalt that reflects "
-    "distant neon signs and cool blue streetlight. Shot from a low-angle three-quarter "
-    "view with shallow depth of field, the background shows a softly blurred Tokyo "
-    "cityscape under cinematic nighttime lighting. Photorealistic style, 35mm lens aesthetic."
+    VEHICLE + ". Frame the vehicle from a low camera angle, with controlled "
+    "cinematic lighting, realistic surface texture, and a photorealistic rendering style."
 )
 NOTICE = "Prompt improvement unavailable — original prompt used"
 
@@ -74,6 +72,25 @@ class PromptHelperTests(unittest.TestCase):
         result, _ = self.call(completion("A futuristic armored vehicle", "length"), VEHICLE)
         self.assert_fallback(result, VEHICLE)
 
+    def test_short_prompt_rejects_overexpanded_answer(self):
+        result, payload = self.call(completion("cat " * 30))
+        self.assert_fallback(result)
+        self.assertIn("one sentence of at most 18 words", payload["messages"][1]["content"])
+
+    def test_changed_constraints_or_invented_counts_fall_back(self):
+        invalid = (
+            VEHICLE.replace("exactly eight wheels", "eight wheels"),
+            VEHICLE + ", with two headlights",
+            CAT + ", no lettering",
+        )
+        for enhanced in invalid:
+            with self.subTest(enhanced=enhanced):
+                result, payload = self.call(completion(enhanced), VEHICLE if "vehicle" in enhanced else CAT)
+                self.assert_fallback(result, VEHICLE if "vehicle" in enhanced else CAT)
+        _, payload = self.call(completion(VEHICLE_RESULT), VEHICLE)
+        self.assertIn('"exactly eight wheels"', payload["messages"][1]["content"])
+        self.assertIn('"no visible weapons"', payload["messages"][1]["content"])
+
     def test_success_uses_only_answer_and_retains_metrics(self):
         result, payload = self.call(completion("\n\n" + VEHICLE_RESULT), VEHICLE)
         self.assertEqual(result.prompt, VEHICLE_RESULT)
@@ -93,10 +110,16 @@ class PromptHelperTests(unittest.TestCase):
                 result, payload = self.call(completion(VEHICLE_RESULT), VEHICLE, strength)
                 self.assertTrue(payload["messages"][1]["content"].endswith(VEHICLE))
                 system = payload["messages"][0]["content"]
-                for rule in ("explicit constraint", "proper name", "number", "count",
-                             "negative requirement exactly", "Never creatively replace the user's concept",
-                             "Return only the improved prompt"):
+                for rule in ("user's prompt is authoritative", "objects", "characters", "weapons",
+                             "mechanical features", "counts", "colors", "locations", "weather",
+                             "story elements", "functions", "technologies", "negative requirements",
+                             "prohibited categories take precedence", "silently compare",
+                             "Never invent exact counts", "under roughly 2–3x", "under 60 words",
+                             "Return only the enhanced prompt"):
                     self.assertIn(rule, system)
+                instruction = payload["messages"][1]["content"].split("\n\nOriginal prompt:", 1)[0]
+                self.assertNotIn("strong visual direction", instruction.lower())
+                self.assertNotIn("add a moderate amount", instruction.lower())
                 for constraint in ("exactly eight wheels", "matte black bodywork", "no visible weapons", "Tokyo at night"):
                     self.assertIn(constraint, result.prompt)
 
@@ -170,20 +193,20 @@ class LivePromptHelperTests(unittest.TestCase):
                 with self.subTest(prompt=prompt, strength=strength):
                     started = time.perf_counter()
                     # Fix the tested model, while using the real HTTP completion path.
-                    with patch.object(helper, "available_models", return_value=[MODEL]):
-                        result = helper.improve(prompt, strength)
+                    with patch.object(helper, "available_models", return_value=[LIVE_MODEL]):
+                        result = helper.improve(prompt, strength, model_id=LIVE_MODEL)
                     elapsed = time.perf_counter() - started
                     print(json.dumps({"prompt": prompt, "strength": strength, "seconds": round(elapsed, 3),
                                       "content": result.prompt, "notice": result.notice}), flush=True)
                     self.assertIsNone(result.notice)
-                    self.assertEqual(result.model, MODEL)
+                    self.assertEqual(result.model, LIVE_MODEL)
                     self.assertNotEqual(result.prompt, prompt)
-                    self.assertLess(len(result.prompt.split()), 140)
+                    self.assertLessEqual(len(result.prompt.split()), 60)
                     self.assertLess(elapsed, 45)
                     if prompt == VEHICLE:
                         for phrase in ("futuristic armored vehicle", "exactly eight wheels", "matte black bodywork",
                                        "no visible weapons", "Tokyo", "night"):
-                            self.assertIn(phrase, result.prompt)
+                            self.assertIn(phrase.lower(), result.prompt.lower())
                     else:
                         for phrase in ("cat", "fence"):
                             self.assertIn(phrase, result.prompt.lower())
