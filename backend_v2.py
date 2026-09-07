@@ -558,21 +558,46 @@ class LMStudioPromptHelper(PromptHelper):
         try:
             with cls.request(f"{cls.endpoint}/v1/models", timeout=0.45) as response:
                 payload = json.load(response)
-            return [str(item.get("id")) for item in payload.get("data", []) if item.get("id")]
+            return list(dict.fromkeys(str(item["id"]) for item in payload.get("data", [])
+                                      if cls.is_chat_model(item)))
         except Exception:
             return []
 
     @staticmethod
+    def is_chat_model(item: dict[str, Any]) -> bool:
+        """Honor explicit type/capabilities; v1 ID-only entries are chat candidates.
+
+        OpenAI's model list does not require capability metadata. Exclude known
+        non-chat families and let the existing safe completion fallback handle
+        servers that advertise an incompatible model without metadata.
+        """
+        model = str(item.get("id") or "")
+        if not model or re.search(r"flux|seedvr|stable.?diffusion|embedding|embed|whisper|tts|rerank", model, re.I):
+            return False
+        kind = str(item.get("type") or item.get("model_type") or "").lower()
+        if kind and kind not in {"llm", "vlm", "chat", "text", "language", "model"}:
+            return False
+        capabilities = item.get("capabilities")
+        if isinstance(capabilities, list) and capabilities:
+            return bool(set(capabilities) & {"chat", "text", "completion", "chat_completion"})
+        return True
+
+    @staticmethod
     def choose_model(models: list[str]) -> str | None:
+        preferred = [model for model in models if re.search(r"qwen.*3[-_]?4b.*2507", model, re.I)]
+        if preferred:
+            return preferred[0]
         small = [model for model in models if re.search(r"(?:^|[-_])(4|5|6|7|8)b(?:[-_]|$)", model, re.I) and re.search(r"instruct|qwen|mistral|llama", model, re.I)]
         if small:
             return small[0]
         fallback = [model for model in models if re.search(r"qwen.?3\.6.*35b|qwen.*35b", model, re.I)]
         return fallback[0] if fallback else None
 
-    def improve(self, prompt: str, strength: str) -> PromptHelperResult:
+    def improve(self, prompt: str, strength: str, model_id: str | None = None) -> PromptHelperResult:
+        if model_id == "off":
+            return PromptHelperResult(prompt)
         models = self.available_models()
-        model = self.choose_model(models)
+        model = (model_id if model_id in models else None) if model_id is not None else self.choose_model(models)
         if not model:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
         instruction = {
@@ -1100,6 +1125,7 @@ def validate_v2_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "project_id": project_id,
             "prompt_improvement": bool(payload.get("prompt_improvement", True)),
             "prompt_improvement_strength": strength,
+            "prompt_helper_model": str(payload["prompt_helper_model"]) if payload.get("prompt_helper_model") is not None else None,
             "improved_prompt_override": str(payload.get("improved_prompt_override") or "").strip() or None,
             "model_retention": retention,
             "reference_path": persistent_reference,
@@ -1171,7 +1197,10 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
         if config["improved_prompt_override"]:
             helper = PromptHelperResult(config["improved_prompt_override"], model="Edited by user")
         elif config["prompt_improvement"]:
-            helper = PROMPT_HELPER.improve(original_prompt, config["prompt_improvement_strength"])
+            if config.get("prompt_helper_model") is not None:
+                helper = PROMPT_HELPER.improve(original_prompt, config["prompt_improvement_strength"], model_id=config["prompt_helper_model"])
+            else:
+                helper = PROMPT_HELPER.improve(original_prompt, config["prompt_improvement_strength"])
         else:
             helper = PromptHelperResult(original_prompt)
         improved_prompt = helper.prompt
@@ -1416,7 +1445,7 @@ class V2Handler(BaseHTTPRequestHandler):
             helper_model = LMStudioPromptHelper.choose_model(helper_models)
             self.send_json(
                 {
-                    "models": v1.public_models(),
+                    "models": [dict(model, purpose="upscale" if model["id"] == SEEDVR2_MODEL_ID else "generation") for model in v1.public_models()],
                     "generations": history(),
                     "projects": list_projects(),
                     "loras": v1.scan_loras(),
@@ -1424,6 +1453,7 @@ class V2Handler(BaseHTTPRequestHandler):
                     "model_status": WORKER.public_status(),
                     "prompt_helper": {
                         "available": helper_model is not None,
+                        "models": helper_models,
                         "model": helper_model,
                         "notice": None if helper_model else "Prompt improvement unavailable — original prompt used",
                     },

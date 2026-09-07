@@ -3,6 +3,8 @@ import Foundation
 struct ModelInfo: Codable, Identifiable, Hashable {
     let id: String
     let label: String
+    let purpose: String?
+    var supportsGeneration: Bool { purpose == "generation" || (purpose == nil && !id.hasPrefix("seedvr")) }
     let tagline: String
     let status: String
     let approxSize: String?
@@ -91,6 +93,7 @@ struct ModelRuntimeStatus: Codable, Hashable {
 }
 
 struct PromptHelperAvailability: Codable, Hashable {
+    var models: [String] = []
     let available: Bool
     let model: String?
     let notice: String?
@@ -139,6 +142,13 @@ struct GenerationJob: Codable, Identifiable {
 }
 
 struct UpscaleJob: Identifiable {
+    var requestPayload: [String: Any] {
+        var payload: [String: Any] = ["source_generation_id": sourceGenerationId,
+                                    "scale": scale, "softness": softness, "seed": seed]
+        if let projectId { payload["project_id"] = projectId }
+        return payload
+    }
+
     let id = UUID()
     var sourceGenerationId: String
     var scale: String = "2x"
@@ -212,4 +222,15 @@ enum HistorySection: String, CaseIterable, Identifiable {
     case previous7Days = "Previous 7 Days"
     case older = "Older"
     var id: String { rawValue }
+}
+
+// Fit uses viewport geometry, never the image's native display size. Upscaling
+// low-resolution images is intentional; the image aspect ratio is preserved.
+enum CanvasSizing {
+    static func fit(image: CGSize, viewport: CGSize, margin: CGFloat = 20) -> CGSize {
+        guard image.width > 0, image.height > 0 else { return .zero }
+        let scale = min(max(0, viewport.width - margin * 2) / image.width,
+                        max(0, viewport.height - margin * 2) / image.height)
+        return CGSize(width: image.width * scale, height: image.height * scale)
+    }
 }

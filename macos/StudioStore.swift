@@ -13,6 +13,36 @@ final class StudioStore: ObservableObject {
     @Published var selectedGeneration: Generation?
     @Published var selectedProjectId: String?
     @Published var workspace = WorkspaceState()
+    @Published var showInspector = true
+    @Published var lastHelperMetrics: PromptHelperMetrics?
+    @Published var selectedImageModel: String {
+        didSet { defaults.set(selectedImageModel, forKey: "generationModelID") }
+    }
+    @Published var helperModelID: String {
+        didSet { defaults.set(helperModelID, forKey: "promptHelperModelID") }
+    }
+    var generationModels: [ModelInfo] { models.filter(\.supportsGeneration) }
+    var helperUnavailable: Bool { helperModelID != "off" && !promptHelper.models.contains(helperModelID) }
+
+    func chooseImageModel(_ id: String) {
+        guard generationModels.contains(where: { $0.id == id }) else { return }
+        selectedImageModel = id
+        workspace.modelId = id
+    }
+
+    func chooseHelper(_ id: String) {
+        helperModelID = id
+        promptImprovement = id != "off"
+        promptImprovementNotice = nil
+        workspace.improvedPrompt = ""
+    }
+
+    private func restoreModelPreferences() {
+        if helperModelID.isEmpty, let preferred = promptHelper.model {
+            helperModelID = promptImprovement ? preferred : "off"
+        }
+        workspace.modelId = selectedImageModel
+    }
     @Published var activeJob: GenerationJob?
     @Published var modelStatus = ModelRuntimeStatus.unloaded
     @Published var promptHelper = PromptHelperAvailability(available: false, model: nil, notice: nil)
@@ -30,16 +60,16 @@ final class StudioStore: ObservableObject {
     @Published var confirmation: Confirmation?
 
     var promptImprovement: Bool {
-        get { UserDefaults.standard.object(forKey: "promptImprovement") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "promptImprovement"); objectWillChange.send() }
+        get { defaults.object(forKey: "promptImprovement") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "promptImprovement"); objectWillChange.send() }
     }
     var promptStrength: String {
-        get { UserDefaults.standard.string(forKey: "promptStrength") ?? "normal" }
-        set { UserDefaults.standard.set(newValue, forKey: "promptStrength"); objectWillChange.send() }
+        get { defaults.string(forKey: "promptStrength") ?? "normal" }
+        set { defaults.set(newValue, forKey: "promptStrength"); objectWillChange.send() }
     }
     var modelRetention: String {
-        get { UserDefaults.standard.string(forKey: "modelRetention") ?? "automatic" }
-        set { UserDefaults.standard.set(newValue, forKey: "modelRetention"); objectWillChange.send() }
+        get { defaults.string(forKey: "modelRetention") ?? "automatic" }
+        set { defaults.set(newValue, forKey: "modelRetention"); objectWillChange.send() }
     }
 
     let backend = BackendController.shared
@@ -60,7 +90,13 @@ final class StudioStore: ObservableObject {
         let action: @MainActor () -> Void
     }
 
-    private init() {}
+    private let defaults: UserDefaults
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        selectedImageModel = defaults.string(forKey: "generationModelID") ?? "flux2_klein_4b"
+        helperModelID = defaults.string(forKey: "promptHelperModelID") ?? ""
+        workspace.modelId = selectedImageModel
+    }
 
     func load() async {
         isLoading = true
@@ -72,11 +108,13 @@ final class StudioStore: ObservableObject {
             loras = bootstrap.loras
             modelStatus = bootstrap.modelStatus
             promptHelper = bootstrap.promptHelper
+            restoreModelPreferences()
             if let active = bootstrap.activeJob {
                 activeJob = active
                 poll(jobId: active.id)
             } else if let first = generations.first {
                 select(first)
+                workspace.modelId = selectedImageModel
             } else {
                 newImage()
             }
@@ -105,12 +143,11 @@ final class StudioStore: ObservableObject {
         promptImprovementNotice = nil
         let carried = workspace
         selectedGeneration = nil
-        selectedProjectId = nil
         workspace = WorkspaceState(
             mode: .newImage,
             originalPrompt: "",
             improvedPrompt: "",
-            modelId: carried.modelId,
+            modelId: selectedImageModel,
             width: carried.width,
             height: carried.height,
             steps: carried.steps,
@@ -119,7 +156,7 @@ final class StudioStore: ObservableObject {
             seed: carried.seed,
             variantCount: carried.variantCount,
             parentId: nil,
-            projectId: carried.projectId,
+            projectId: selectedProjectId,
             referenceGenerationId: nil,
             referenceData: nil,
             referencePath: nil,
@@ -138,7 +175,7 @@ final class StudioStore: ObservableObject {
             mode: .viewing,
             originalPrompt: generation.originalPrompt,
             improvedPrompt: generation.improvedPrompt,
-            modelId: generation.modelId,
+            modelId: generation.isUpscale ? selectedImageModel : generation.modelId,
             width: generation.width,
             height: generation.height,
             steps: generation.steps,
@@ -167,7 +204,7 @@ final class StudioStore: ObservableObject {
         workspace.referenceGenerationId = generation.referenceSourceId
         workspace.referencePath = generation.referenceSourceId == nil ? generation.referenceImagePath : nil
         workspace.referenceName = generation.referenceImagePath.map { URL(fileURLWithPath: $0).lastPathComponent }
-        notice = "Fork created. The parent remains unchanged."
+        showInspector = true
     }
 
     func editSelected() {
@@ -181,7 +218,7 @@ final class StudioStore: ObservableObject {
         workspace.originalPrompt = ""
         workspace.improvedPrompt = ""
         workspace.randomSeed = true
-        notice = "Edit fork created with the source image attached."
+        showInspector = true
     }
 
     func regenerateSelected() {
@@ -210,6 +247,7 @@ final class StudioStore: ObservableObject {
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
         promptImprovementNotice = nil
+        lastHelperMetrics = nil
         var payload: [String: Any] = [
             "prompt": prompt,
             "model_id": workspace.modelId,
@@ -220,7 +258,8 @@ final class StudioStore: ObservableObject {
             "random_seed": workspace.randomSeed,
             "seed": workspace.seed,
             "variant_count": workspace.variantCount,
-            "prompt_improvement": promptImprovement,
+            "prompt_improvement": promptImprovement && helperModelID != "off",
+            "prompt_helper_model": helperModelID.isEmpty ? "off" : helperModelID,
             "prompt_improvement_strength": promptStrength,
             "model_retention": modelRetention,
             "lora_scale": workspace.loraScale,
@@ -252,6 +291,7 @@ final class StudioStore: ObservableObject {
                     if let status = job.modelStatus { modelStatus = status }
                     if let original = job.originalPrompt { workspace.originalPrompt = original }
                     if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
+                    if let metrics = job.promptHelper, metrics.model != nil { lastHelperMetrics = metrics }
                     promptImprovementNotice = job.promptNotice
                     if job.state == "complete" {
                         let results = job.generations ?? job.generation.map { [$0] } ?? []
@@ -260,6 +300,7 @@ final class StudioStore: ObservableObject {
                         // Keep the fallback status visible after selecting the result.
                         promptImprovementNotice = job.promptNotice
                         activeJob = nil
+                        await refreshProjects()
                         await refreshStatus()
                         return
                     }
@@ -403,6 +444,7 @@ final class StudioStore: ObservableObject {
                 let moved: Generation = try await backend.post("/api/generations/\(generation.id)/move", json: ["project_id": value])
                 if let index = generations.firstIndex(where: { $0.id == moved.id }) { generations[index] = moved }
                 selectedGeneration = moved
+                selectedProjectId = projectId
                 workspace.projectId = projectId
                 await refreshProjects()
             } catch { errorMessage = error.localizedDescription }
@@ -481,50 +523,16 @@ final class StudioStore: ObservableObject {
     }
 
     func performUpscale(job: UpscaleJob) async {
-        guard let sourceGen = selectedGeneration else { return }
+        guard activeJob == nil else { return }
         showUpscaleSheet = false
         errorMessage = nil
-        notice = "Starting SeedVR2 7B upscale…"
-
         do {
-            var payload: [String: Any] = [
-                "source_generation_id": sourceGen.id,
-                "scale": job.scale,
-                "softness": job.softness,
-                "seed": job.seed,
-            ]
-            if let pid = job.projectId {
-                payload["project_id"] = pid
-            }
-
-            let jobResp: UpscaleJobResponse = try await backend.post("/api/upscale", json: payload)
-            let jobId = jobResp.id
-
-            // Poll for completion
-            let deadline = Date().addingTimeInterval(600)  // 10 min
-            while Date() < deadline {
-                try await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
-                if Task.isCancelled { return }
-                do {
-                    let jobStatus: UpscaleJobStatus = try await backend.get("/api/jobs/\(jobId)")
-                    let state = jobStatus.state
-                    if state == "complete" {
-                        notice = "Upscale complete!"
-                        await refresh()
-                        return
-                    } else if state == "error" {
-                        errorMessage = jobStatus.message ?? "Upscale failed"
-                        return
-                    }
-                } catch {
-                    errorMessage = error.localizedDescription
-                    return
-                }
-            }
-            errorMessage = "Upscale timed out (10 minutes)."
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+            // The same job observer drives generation and upscale presentation.
+            // SeedVR2's backend, lineage, metadata and cleanup remain unchanged.
+            let response: GenerationJob = try await backend.post("/api/upscale", json: job.requestPayload)
+            activeJob = response
+            poll(jobId: response.id)
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func group(for generation: Generation) -> HistorySection {
@@ -545,6 +553,21 @@ final class StudioStore: ObservableObject {
             parent = generations.first(where: { $0.id == id })?.parentId
         }
         return depth
+    }
+
+    var visibleHistory: [Generation] {
+        let items = generations.filter { selectedProjectId == nil || $0.projectId == selectedProjectId }
+        let ids = Set(items.map(\.id))
+        var result: [Generation] = []
+        var seen = Set<String>()
+        func append(_ item: Generation) {
+            guard seen.insert(item.id).inserted else { return }
+            result.append(item)
+            for child in items.reversed() where child.parentId == item.id { append(child) }
+        }
+        for item in items where item.parentId == nil || !ids.contains(item.parentId!) { append(item) }
+        for item in items { append(item) }
+        return result
     }
 
     func generations(in section: HistorySection) -> [Generation] {

@@ -7,15 +7,38 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
+        VStack(spacing: 0) {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 330)
         } detail: {
-            WorkspaceView()
+            HSplitView {
+                WorkspaceView().frame(minWidth: 350)
+                if store.showInspector {
+                    InspectorView().frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
+                }
+            }
+        }
+        ComposerView()
         }
         .frame(minWidth: 940, minHeight: 680)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Picker("Image Model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
+                    ForEach(store.generationModels) { Text("\($0.label) · \($0.status)").tag($0.id) }
+                }.frame(maxWidth: 280).help("Image generation model").accessibilityLabel("Image Model")
+            }
+            ToolbarItem(placement: .status) { ModelStatusLabel(status: store.modelStatus, job: store.activeJob) }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { store.exportImage() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                    .disabled(store.selectedGeneration == nil || store.selectedGeneration?.archived == true).help("Export Image (⌘E)")
+                Button { store.showModels = true } label: { Label("Models", systemImage: "square.stack.3d.up") }.help("Manage Models")
+                Button { store.showInspector.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }.help("Toggle Inspector (⌘⌥I)")
+            }
+        }
+
         .onReceive(NotificationCenter.default.publisher(for: .toggleStudioSidebar)) { _ in
-            withAnimation { columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly }
+            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
         .sheet(isPresented: $store.showModels) { ModelsSheet() }
         .sheet(isPresented: $store.showUpscaleSheet) {
@@ -28,10 +51,6 @@ struct ContentView: View {
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
         )) { Button("OK") { store.errorMessage = nil } } message: { Text(store.errorMessage ?? "") }
-        .alert("Local Image Studio", isPresented: Binding(
-            get: { store.notice != nil },
-            set: { if !$0 { store.notice = nil } }
-        )) { Button("OK") { store.notice = nil } } message: { Text(store.notice ?? "") }
         .alert(item: $store.confirmation) { confirmation in
             Alert(
                 title: Text(confirmation.title),
@@ -58,7 +77,7 @@ struct ModelStatusLabel: View {
             }
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
-        .help(status.activeMemoryBytes.map { "Resident memory: \(formatBytes($0))" } ?? "No image model resident")
+        .help(status.activeMemoryBytes.map { "Worker active memory: \(formatBytes($0))" } ?? "No image model resident")
     }
 
     private var label: String {
@@ -67,7 +86,7 @@ struct ModelStatusLabel: View {
         }
         guard status.status == "loaded", let id = status.modelId else { return "Unloaded" }
         if id == "seedvr2_7b" {
-            return "SeedVR2 Loaded"
+            return job == nil ? "Ready" : "Upscaling"
         }
         return id.contains("9b") ? "9B Loaded" : "4B Loaded"
     }
@@ -84,8 +103,8 @@ struct SidebarView: View {
                 Label("New Image", systemImage: "plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
             .padding(12)
             .keyboardShortcut("n", modifiers: .command)
 
@@ -95,6 +114,10 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     DisclosureGroup(isExpanded: $store.projectsExpanded) {
                         VStack(spacing: 2) {
+                            Button { store.selectedProjectId = nil } label: {
+                                Label("All Images", systemImage: "photo.on.rectangle")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }.buttonStyle(.plain).padding(6)
                             ForEach(store.projects) { project in ProjectRow(project: project) }
                             Button { store.createProject() } label: {
                                 Label("New Project", systemImage: "plus.circle")
@@ -111,19 +134,7 @@ struct SidebarView: View {
 
                     DisclosureGroup(isExpanded: $store.historyExpanded) {
                         VStack(alignment: .leading, spacing: 10) {
-                            ForEach(HistorySection.allCases) { section in
-                                let items = store.generations(in: section)
-                                if !items.isEmpty {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(section.rawValue)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(.tertiary)
-                                            .textCase(.uppercase)
-                                            .padding(.leading, 4)
-                                        ForEach(items) { generation in HistoryRow(generation: generation) }
-                                    }
-                                }
-                            }
+                            ForEach(store.visibleHistory) { generation in HistoryRow(generation: generation) }
                             if store.generations.isEmpty {
                                 Text("Generated images will appear here.")
                                     .font(.caption)
@@ -133,7 +144,7 @@ struct SidebarView: View {
                         }
                         .padding(.top, 8)
                     } label: {
-                        SidebarSectionLabel(title: "History", count: store.generations.count)
+                        SidebarSectionLabel(title: "History", count: store.visibleHistory.count)
                     }
                 }
                 .padding(12)
@@ -199,7 +210,8 @@ struct HistoryRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 Thumbnail(path: generation.thumbnailPath ?? generation.imagePath)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 54, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(generation.originalPrompt)
                         .font(.caption)
@@ -207,13 +219,13 @@ struct HistoryRow: View {
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
                         if generation.variantCount > 1 { Text("\(generation.variantIndex)/\(generation.variantCount)") }
-                        Text(generation.modelId.contains("9b") ? "9B" : "4B")
+                        Text(generation.isUpscale ? "Upscale \(generation.upscaleScaleFactor ?? "")" : generation.parentId == nil ? "Original" : generation.referenceUsed ? "Edit" : "Variation / Fork")
                         Text("·")
                         Text(generation.date, style: .time)
                         if generation.archived { Image(systemName: "archivebox") }
                     }
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
@@ -263,7 +275,6 @@ struct WorkspaceView: View {
             Divider()
             CanvasView()
             if store.selectedGeneration != nil { ActionBar() }
-            ComposerView()
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -271,61 +282,34 @@ struct WorkspaceView: View {
 
 struct PerformanceBar: View {
     @EnvironmentObject private var store: StudioStore
-
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 8) {
             if let job = store.activeJob {
                 ProgressView().controlSize(.small)
-                Text(liveText(job))
+                Text(job.message).lineLimit(1)
+                Spacer()
+                if let elapsed = job.elapsed { Text(String(format: "%.1f s", elapsed)).monospacedDigit() }
             } else if let generation = store.selectedGeneration {
-                Text(generation.model)
-                dot
-                Text(generation.quantizationLabel == "None" ? "No quantization" : generation.quantizationLabel)
-                dot
-                Text("\(generation.width)×\(generation.height)")
-                dot
-                Text("\(generation.steps) steps")
-                dot
-                Text(String(format: "%.1f sec", generation.generationTime))
-                dot
-                Text(String(format: "%.2f steps/sec", generation.stepsPerSecond))
-                if let memory = generation.peakMemoryBytes { dot; Text("\(formatBytes(memory)) peak") }
+                Text(generation.model).lineLimit(1)
+                Spacer()
+                Text("\(generation.width) × \(generation.height)")
+                Text(String(format: "·  %.1f s", generation.generationTime)).monospacedDigit()
             } else {
-                Text("Ready to generate")
-            }
-            Spacer()
-            if let helper = store.selectedGeneration?.promptHelper, let model = helper.model {
-                Text(promptHelperText(helper, model: model)).help("Prompt-helper language metrics are separate from diffusion speed.")
+                Text(store.workspace.mode == .edit ? "Edit image" : store.workspace.mode == .fork ? "New variation" : "New image")
+                Spacer()
+                Text("\(store.workspace.width) × \(store.workspace.height)")
             }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
-        .frame(height: 32)
-    }
-
-    private var dot: some View { Text("·").foregroundStyle(.tertiary) }
-
-    private func liveText(_ job: GenerationJob) -> String {
-        var parts = [job.message]
-        if let elapsed = job.elapsed { parts.append(String(format: "%.1f sec", elapsed)) }
-        if let memory = job.peakMemoryBytes { parts.append(formatBytes(memory)) }
-        return parts.joined(separator: " · ")
-    }
-
-    private func promptHelperText(_ helper: PromptHelperMetrics, model: String) -> String {
-        var parts = ["Prompt Helper", model]
-        if let rate = helper.tokensPerSecond { parts.append(String(format: "%.0f tok/s", rate)) }
-        if let ttft = helper.timeToFirstToken { parts.append(String(format: "TTFT %.1f sec", ttft)) }
-        if let count = helper.tokenCount { parts.append("\(count) tokens") }
-        if let total = helper.totalTime { parts.append(String(format: "%.1f sec", total)) }
-        return parts.joined(separator: " · ")
+        .font(.caption).foregroundStyle(.secondary)
+        .padding(.horizontal, 16).frame(height: 32)
+        .accessibilityElement(children: .combine)
     }
 }
 
 struct CanvasView: View {
     @EnvironmentObject private var store: StudioStore
     @State private var zoom: CGFloat = 1
+    @GestureState private var pinch: CGFloat = 1
     @State private var actualSize = false
     @State private var isDropTarget = false
 
@@ -340,30 +324,31 @@ struct CanvasView: View {
                         Text("Restore its project to open the full-resolution image.").foregroundStyle(.secondary)
                     }
                 } else if let image = NSImage(contentsOfFile: generation.imagePath) {
-                    ScrollView([.horizontal, .vertical]) {
-                        GeometryReader { geometry in
-                            Image(nsImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(
-                                    width: actualSize ? image.size.width : max(100, geometry.size.width - 40),
-                                    height: actualSize ? image.size.height : max(100, geometry.size.height - 40)
-                                )
-                                .scaleEffect(zoom)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    GeometryReader { geometry in
+                        let pixels = CGSize(width: generation.width, height: generation.height)
+                        let fit = CanvasSizing.fit(image: pixels, viewport: geometry.size)
+                        let base = actualSize ? CGSize(width: pixels.width / (NSScreen.main?.backingScaleFactor ?? 2), height: pixels.height / (NSScreen.main?.backingScaleFactor ?? 2)) : fit
+                        let scale = max(0.2, min(5, zoom * pinch))
+                        let display = CGSize(width: base.width * scale, height: base.height * scale)
+                        ScrollView([.horizontal, .vertical]) {
+                            Image(nsImage: image).resizable()
+                                .frame(width: display.width, height: display.height)
                                 .padding(20)
+                                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                         }
-                        .frame(minWidth: 400, minHeight: 320)
                     }
-                    .gesture(MagnificationGesture().onChanged { zoom = max(0.2, min(5, $0)) })
+                    .gesture(MagnificationGesture()
+                        .updating($pinch) { value, state, _ in state = value }
+                        .onEnded { zoom = max(0.2, min(5, zoom * $0)) })
                     .overlay(alignment: .bottomTrailing) {
                         HStack(spacing: 4) {
-                            Button { actualSize = false; zoom = 1 } label: { Image(systemName: "arrow.down.right.and.arrow.up.left") }.help("Fit to window")
+                            Button("Fit") { actualSize = false; zoom = 1 }.help("Fit to window")
                             Button { actualSize = true; zoom = 1 } label: { Text("100%") }.help("Actual size")
-                            Button { zoom = max(0.2, zoom - 0.25) } label: { Image(systemName: "minus.magnifyingglass") }
-                            Button { zoom = min(5, zoom + 0.25) } label: { Image(systemName: "plus.magnifyingglass") }
+                            Button { zoom = max(0.2, zoom - 0.25) } label: { Image(systemName: "minus.magnifyingglass") }.help("Zoom out").accessibilityLabel("Zoom out")
+                            Button { zoom = min(5, zoom + 0.25) } label: { Image(systemName: "plus.magnifyingglass") }.help("Zoom in").accessibilityLabel("Zoom in")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                         .padding(12)
                     }
                 }
@@ -382,6 +367,7 @@ struct CanvasView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: store.selectedGeneration?.id) { _ in actualSize = false; zoom = 1 }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTarget) { providers in
             guard store.selectedGeneration == nil, let provider = providers.first else { return false }
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
@@ -415,31 +401,31 @@ struct EmptyCanvas: View {
 struct ActionBar: View {
     @EnvironmentObject private var store: StudioStore
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 5) {
-                Button("Edit", systemImage: "pencil") { store.editSelected() }
-                Button("Fork", systemImage: "arrow.triangle.branch") { store.forkSelected() }
-                Button("Regenerate", systemImage: "arrow.clockwise") { store.regenerateSelected() }
-                Button("Variation", systemImage: "dice") { store.variationSelected() }
-                Button("Upscale", systemImage: "arrow.up.left.and.arrow.down.right") { store.showUpscaleNotice() }
-                Divider().frame(height: 18)
-                Button("Save", systemImage: "square.and.arrow.down") { store.exportImage() }
-                Button("Copy", systemImage: "doc.on.doc") { store.copyImage() }
-                Button("Export", systemImage: "square.and.arrow.up") { store.exportImage() }
-                Button("Reveal", systemImage: "folder") { store.revealImage() }
-                Menu("Move", systemImage: "folder.badge.plus") {
+        HStack(spacing: 12) {
+            Button("Edit", systemImage: "pencil") { store.editSelected() }
+            Button("Variation", systemImage: "dice") { store.variationSelected() }
+            Button("Upscale", systemImage: "arrow.up.left.and.arrow.down.right") { store.showUpscaleNotice() }
+            Spacer()
+            Menu {
+                Button("Fork") { store.forkSelected() }
+                Button("Regenerate") { store.regenerateSelected() }
+                Divider()
+                Button("Save As…") { store.exportImage() }
+                Button("Copy Image") { store.copyImage() }
+                Button("Reveal in Finder") { store.revealImage() }
+                Menu("Move to Project") {
                     Button("No Project") { store.moveSelected(to: nil) }
-                    Divider()
-                    ForEach(store.projects.filter { !$0.archived }) { project in Button(project.name) { store.moveSelected(to: project.id) } }
+                    ForEach(store.projects.filter { !$0.archived }) { project in
+                        Button(project.name) { store.moveSelected(to: project.id) }
+                    }
                 }
-                Divider().frame(height: 18)
-                Button("Delete", systemImage: "trash", role: .destructive) { store.requestDeleteGeneration() }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+                Divider()
+                Button("Delete…", role: .destructive) { store.requestDeleteGeneration() }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize().help("More image actions").accessibilityLabel("More image actions")
         }
+        .disabled(store.activeJob != nil || store.selectedGeneration?.archived == true)
+        .controlSize(.small).padding(.horizontal, 16).padding(.vertical, 9)
         .background(.bar)
     }
 }
@@ -447,159 +433,223 @@ struct ActionBar: View {
 struct ComposerView: View {
     @EnvironmentObject private var store: StudioStore
     @FocusState private var promptFocused: Bool
-
+    private var promptHeight: CGFloat {
+        let lines = store.workspace.originalPrompt.components(separatedBy: "\n").count
+        return CGFloat(min(5, max(3, lines))) * 17 + 8
+    }
     var body: some View {
-        VStack(spacing: 0) {
-            Divider()
-            VStack(spacing: 10) {
-                if let referenceName = store.workspace.referenceName {
-                    HStack {
-                        Label(referenceName, systemImage: "paperclip")
-                            .font(.caption).lineLimit(1)
-                        Spacer()
-                        Button { store.clearReference() } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                    }
-                    .padding(8)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(store.workspace.mode == .edit ? "Describe your changes" : "Prompt").font(.headline)
+                if let name = store.workspace.referenceName {
+                    Label(name, systemImage: "paperclip").lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                    Button { store.clearReference() } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.plain).help("Remove reference image").accessibilityLabel("Remove reference image")
                 }
-
-                HStack(alignment: .bottom, spacing: 9) {
-                    Button { store.chooseReferenceImage() } label: { Image(systemName: "paperclip") }
-                        .buttonStyle(.bordered).help("Attach reference image")
-                    TextField(store.workspace.mode == .edit ? "What should change?" : "Describe the image you want to create…", text: $store.workspace.originalPrompt, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(2...6)
-                        .focused($promptFocused)
-                        .padding(.vertical, 7)
-                    Button {
-                        Task { await store.generate() }
-                    } label: {
-                        Label("Generate", systemImage: "sparkles")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(store.activeJob != nil)
-                    .keyboardShortcut("g", modifiers: .command)
-                }
-
-                HStack(spacing: 12) {
-                    Toggle("Prompt Improvement", isOn: Binding(get: { store.promptImprovement }, set: { store.promptImprovement = $0 }))
-                        .toggleStyle(.switch).controlSize(.small)
+                Spacer()
+                Button { store.chooseReferenceImage() } label: { Image(systemName: "paperclip") }
+                    .help("Attach reference image").accessibilityLabel("Attach reference image")
+            }
+            TextEditor(text: Binding(get: { store.workspace.originalPrompt }, set: { store.workspace.originalPrompt = $0; store.workspace.improvedPrompt = "" }))
+                .font(.body).scrollContentBackground(.hidden)
+                .frame(height: promptHeight).padding(5)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                .focused($promptFocused).accessibilityLabel("Image prompt")
+                .disabled(store.activeJob != nil)
+            HStack(spacing: 10) {
+                HelperPicker().frame(maxWidth: 330).disabled(store.activeJob != nil)
+                Menu {
                     Picker("Strength", selection: Binding(get: { store.promptStrength }, set: { store.promptStrength = $0 })) {
                         Text("Light").tag("light"); Text("Normal").tag("normal"); Text("Strong").tag("strong")
                     }
-                    .pickerStyle(.menu).frame(width: 130).disabled(!store.promptImprovement)
-                    if !store.promptHelper.available && store.promptImprovement && store.promptImprovementNotice == nil {
-                        Label("Original prompt will be used", systemImage: "info.circle")
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .help("Prompt improvement unavailable — original prompt used")
+                    Button("Refresh Models") { Task { await store.refresh() } }
+                    if !store.workspace.improvedPrompt.isEmpty {
+                        Button("Review Improved Prompt…") { store.showImprovedPrompt = true }
                     }
-                    Spacer()
-                    Button(store.showAdvanced ? "Hide Advanced" : "Advanced", systemImage: "slider.horizontal.3") { withAnimation { store.showAdvanced.toggle() } }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                } label: { Image(systemName: "slider.horizontal.3") }
+                .fixedSize().menuStyle(.borderlessButton).accessibilityLabel("Prompt helper options").help("Prompt helper options")
+                if let metrics = store.lastHelperMetrics {
+                    HelperMetricsLabel(metrics: metrics)
+                } else if store.helperUnavailable {
+                    Text("Helper unavailable; original prompt will be used").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
-                .font(.caption)
-
-                if let promptNotice = store.promptImprovementNotice {
-                    Label(promptNotice, systemImage: "info.circle")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("promptImprovementStatus")
-                }
-
-                if store.promptImprovement && (!store.workspace.improvedPrompt.isEmpty || store.selectedGeneration != nil) {
-                    DisclosureGroup("Show Improved Prompt", isExpanded: $store.showImprovedPrompt) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Original Prompt").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(store.workspace.originalPrompt).font(.caption).textSelection(.enabled)
-                            Text("Improved Prompt").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            TextEditor(text: $store.workspace.improvedPrompt)
-                                .font(.caption).frame(minHeight: 55, maxHeight: 90)
-                                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.2)))
-                        }
-                        .padding(.top, 6)
-                    }
-                    .font(.caption)
-                }
-
-                if store.showAdvanced { AdvancedSettingsView() }
+                Spacer(minLength: 0)
+                Button("Generate", systemImage: "sparkles") { Task { await store.generate() } }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
+                    .disabled(store.activeJob != nil || store.workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(12)
+            .controlSize(.small)
+            if let notice = store.notice {
+                Text(notice).font(.caption).foregroundStyle(.secondary)
+            }
+            if let status = store.promptImprovementNotice {
+                Label(status, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("promptImprovementStatus")
+            }
         }
-        .background(.bar)
+        .padding(.horizontal, 16).padding(.vertical, 12).background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .sheet(isPresented: $store.showImprovedPrompt) { ImprovedPromptSheet() }
+        .task(id: store.notice) {
+            guard store.notice != nil else { return }
+            do { try await Task.sleep(nanoseconds: 5_000_000_000); store.notice = nil }
+            catch {}
+        }
     }
 }
 
-struct AdvancedSettingsView: View {
+struct HelperPicker: View {
     @EnvironmentObject private var store: StudioStore
-    let columns = Array(repeating: GridItem(.flexible(minimum: 110), spacing: 10), count: 4)
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-            field("Width") { TextField("Width", value: $store.workspace.width, format: .number).textFieldStyle(.roundedBorder) }
-            field("Height") { TextField("Height", value: $store.workspace.height, format: .number).textFieldStyle(.roundedBorder) }
-            field("Steps") { Stepper(value: $store.workspace.steps, in: 1...100) { Text("\(store.workspace.steps)") } }
-            field("Quantization") {
-                Picker("", selection: $store.workspace.quantization) {
-                    Text("None").tag(nil as Int?)
-                    Text("8-bit").tag(8 as Int?)
-                    Text("6-bit").tag(6 as Int?)
-                    Text("4-bit").tag(4 as Int?)
-                }.labelsHidden()
+        Picker("Prompt Helper", selection: Binding(get: { store.helperModelID }, set: { store.chooseHelper($0) })) {
+            Text("Off").tag("off")
+            if store.helperModelID.isEmpty { Text("Unavailable").tag("") }
+            ForEach(store.promptHelper.models, id: \.self) { Text($0).tag($0) }
+            if !store.helperModelID.isEmpty && store.helperUnavailable {
+                Text("\(store.helperModelID) (unavailable)").tag(store.helperModelID)
             }
-            field("Aspect Ratio") {
-                Picker("", selection: aspectBinding) {
-                    Text("1:1").tag("1:1"); Text("4:3").tag("4:3"); Text("3:4").tag("3:4"); Text("16:9").tag("16:9"); Text("9:16").tag("9:16")
-                }.labelsHidden()
-            }
-            field("Random Seed") { Toggle(store.workspace.randomSeed ? "On" : "Off", isOn: $store.workspace.randomSeed).toggleStyle(.switch) }
-            field("Seed") { TextField("Seed", value: $store.workspace.seed, format: .number).textFieldStyle(.roundedBorder).disabled(store.workspace.randomSeed) }
-            field("Variants") {
-                Picker("", selection: $store.workspace.variantCount) { Text("1").tag(1); Text("2").tag(2); Text("4").tag(4) }
-                    .pickerStyle(.segmented).labelsHidden()
-            }
-            field("Reference Image") { Button(store.workspace.referenceName ?? "Choose…") { store.chooseReferenceImage() }.lineLimit(1) }
-            field("LoRA") {
-                Picker("", selection: $store.workspace.loraId) {
-                    Text("None").tag(nil as String?)
-                    ForEach(store.loras) { lora in Text(lora.name).tag(lora.id as String?) }
-                }.labelsHidden()
-            }
-            field("LoRA Strength") { TextField("Strength", value: $store.workspace.loraScale, format: .number.precision(.fractionLength(2))).textFieldStyle(.roundedBorder).disabled(store.workspace.loraId == nil) }
-            field("Project") {
-                Picker("", selection: $store.workspace.projectId) {
-                    Text("No Project").tag(nil as String?)
-                    ForEach(store.projects.filter { !$0.archived }) { project in Text(project.name).tag(project.id as String?) }
-                }.labelsHidden()
-            }
-        }
-        .font(.caption)
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+        }.pickerStyle(.menu).help("Choose a local text model independently of the image model")
     }
+}
 
-    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) { Text(title).foregroundStyle(.secondary); content() }
+struct HelperMetricsLabel: View {
+    let metrics: PromptHelperMetrics
+    var body: some View {
+        Text([
+            metrics.tokensPerSecond.map { String(format: "%.0f tok/s", $0) },
+            metrics.totalTime.map { String(format: "%.1f s", $0) },
+            metrics.tokenCount.map { "\($0) tok" }
+        ].compactMap { $0 }.joined(separator: " · "))
+        .font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+        .help("\(metrics.model ?? "Prompt Helper") — throughput is output tokens divided by total request latency.")
     }
+}
 
+struct ImprovedPromptSheet: View {
+    @EnvironmentObject private var store: StudioStore
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Review Prompt").font(.title2)
+            Text("Original").font(.headline)
+            Text(store.workspace.originalPrompt).textSelection(.enabled)
+            Text("Improved").font(.headline)
+            TextEditor(text: $store.workspace.improvedPrompt).frame(height: 160)
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }.padding(20).frame(width: 540)
+    }
+}
+
+struct InspectorView: View {
+    @EnvironmentObject private var store: StudioStore
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(store.selectedGeneration == nil ? "Generation" : "Image Info").font(.headline)
+                Spacer()
+                Button { store.showInspector = false } label: { Image(systemName: "sidebar.right") }
+                    .buttonStyle(.plain).help("Hide inspector").accessibilityLabel("Hide inspector")
+            }.padding(16)
+            Divider()
+            Form {
+                if let gen = store.selectedGeneration {
+                    Section("Image") {
+                        info("Model", gen.model)
+                        info("Resolution", "\(gen.width) × \(gen.height)")
+                        info("Seed", "\(gen.seed)")
+                        info("Steps", "\(gen.steps)")
+                        info("Quantization", gen.quantizationLabel)
+                    }
+                    Section("Performance") {
+                        info("Time", String(format: "%.2f s", gen.generationTime))
+                        if !gen.isUpscale { info("Speed", String(format: "%.2f steps/s", gen.stepsPerSecond)) }
+                        if let memory = gen.peakMemoryBytes { info("Peak memory", formatBytes(memory)) }
+                    }
+                    if let parent = gen.parentId {
+                        Section("Lineage") {
+                            if let source = store.generations.first(where: { $0.id == parent }) {
+                                Button { store.select(source) } label: {
+                                    Label("View parent image", systemImage: "arrow.turn.up.left")
+                                }.help(source.originalPrompt)
+                            } else { Text("Parent outside loaded history").foregroundStyle(.secondary) }
+                            if let scale = gen.upscaleScaleFactor { info("Upscale", scale) }
+                            if let precision = gen.upscalePrecision { info("Precision", precision) }
+                            if gen.isUpscale { info("Source", "\(gen.upscaleSourceWidth) × \(gen.upscaleSourceHeight)") }
+                        }
+                    }
+                    if gen.promptHelper.model != nil {
+                        Section("Prompt Helper") {
+                            Text(gen.promptHelper.model ?? "").font(.caption).textSelection(.enabled)
+                            HelperMetricsLabel(metrics: gen.promptHelper)
+                        }
+                    }
+                    Button("Generation Settings") { store.selectedGeneration = nil; store.workspace.mode = .fork }
+                } else {
+                    Section("Generation") {
+                        Picker("Image Model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
+                            ForEach(store.generationModels) { Text($0.label).tag($0.id) }
+                        }
+                        Picker("Resolution", selection: aspectBinding) {
+                            Text("Square · 1024 × 1024").tag("square")
+                            Text("4:3 · 1152 × 864").tag("4:3")
+                            Text("3:4 · 864 × 1152").tag("3:4")
+                            Text("Portrait · 768 × 1344").tag("portrait")
+                            Text("Landscape · 1344 × 768").tag("landscape")
+                            Text("Custom").tag("custom")
+                        }
+                        HStack {
+                            TextField("Width", value: $store.workspace.width, format: .number)
+                            Text("×").foregroundStyle(.secondary)
+                            TextField("Height", value: $store.workspace.height, format: .number)
+                        }
+                        Stepper("Steps: \(store.workspace.steps)", value: $store.workspace.steps, in: 1...100)
+                        Toggle("Random seed", isOn: $store.workspace.randomSeed)
+                        if !store.workspace.randomSeed { TextField("Seed", value: $store.workspace.seed, format: .number) }
+                        Picker("Project", selection: $store.workspace.projectId) {
+                            Text("No Project").tag(nil as String?)
+                            ForEach(store.projects.filter { !$0.archived }) { Text($0.name).tag($0.id as String?) }
+                        }
+                    }
+                    DisclosureGroup("Advanced", isExpanded: $store.showAdvanced) {
+                        Picker("Quantization", selection: $store.workspace.quantization) {
+                            Text("None").tag(nil as Int?)
+                            ForEach([4, 6, 8], id: \.self) { Text("\($0)-bit").tag($0 as Int?) }
+                        }
+                        Picker("Variants", selection: $store.workspace.variantCount) {
+                            ForEach([1, 2, 4], id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        Picker("LoRA", selection: $store.workspace.loraId) {
+                            Text("None").tag(nil as String?)
+                            ForEach(store.loras) { Text($0.name).tag($0.id as String?) }
+                        }
+                        if store.workspace.loraId != nil { TextField("LoRA strength", value: $store.workspace.loraScale, format: .number) }
+                    }
+                    Button("Manage Models…") { store.showModels = true }
+                }
+            }.formStyle(.grouped).controlSize(.small)
+        }.background(Color(nsColor: .windowBackgroundColor))
+    }
+    private func info(_ title: String, _ value: String) -> some View {
+        LabeledContent(title) { Text(value).textSelection(.enabled) }
+    }
     private var aspectBinding: Binding<String> {
         Binding {
             switch (store.workspace.width, store.workspace.height) {
+            case (1024, 1024): return "square"
             case (1152, 864): return "4:3"
             case (864, 1152): return "3:4"
-            case (1344, 768): return "16:9"
-            case (768, 1344): return "9:16"
-            default: return "1:1"
+            case (768, 1344): return "portrait"
+            case (1344, 768): return "landscape"
+            default: return "custom"
             }
         } set: { value in
             switch value {
+            case "square": store.workspace.width = 1024; store.workspace.height = 1024
             case "4:3": store.workspace.width = 1152; store.workspace.height = 864
             case "3:4": store.workspace.width = 864; store.workspace.height = 1152
-            case "16:9": store.workspace.width = 1344; store.workspace.height = 768
-            case "9:16": store.workspace.width = 768; store.workspace.height = 1344
-            default: store.workspace.width = 1024; store.workspace.height = 1024
+            case "portrait": store.workspace.width = 768; store.workspace.height = 1344
+            case "landscape": store.workspace.width = 1344; store.workspace.height = 768
+            default: break
             }
         }
     }
@@ -686,12 +736,11 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Prompt Improvement") {
-                Toggle("Improve prompts before image generation", isOn: Binding(get: { store.promptImprovement }, set: { store.promptImprovement = $0 }))
+                HelperPicker()
                 Picker("Strength", selection: Binding(get: { store.promptStrength }, set: { store.promptStrength = $0 })) {
                     Text("Light").tag("light"); Text("Normal").tag("normal"); Text("Strong").tag("strong")
                 }
-                Text(store.promptHelper.available ? "Using \(store.promptHelper.model ?? "local helper")" : "Unavailable right now; the original prompt will be used.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Button("Refresh Models") { Task { await store.refresh() } }
             }
             Section("Model Retention") {
                 Picker("After generation", selection: Binding(get: { store.modelRetention }, set: { store.modelRetention = $0 })) {
@@ -749,6 +798,7 @@ struct UpscaleSheet: View {
                     HStack(spacing: 12) {
                         Thumbnail(path: sourceGeneration.thumbnailPath ?? sourceGeneration.imagePath)
                             .frame(width: 80, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(sourceGeneration.filename).font(.headline)
                             Text("\(sourceGeneration.width) × \(sourceGeneration.height)").font(.caption).foregroundStyle(.secondary)
@@ -860,54 +910,9 @@ struct UpscaleSheet: View {
     }
 
     private func runUpscale() async {
-        isRunning = true
-        errorMessage = nil
-        progressMessage = "Starting SeedVR2 7B upscale…"
-
-        do {
-            var payload: [String: Any] = [
-                "source_generation_id": sourceGeneration.id,
-                "scale": scale,
-                "softness": softness,
-                "seed": seed,
-            ]
-            if let pid = store.selectedProjectId {
-                payload["project_id"] = pid
-            }
-
-            let jobResp: UpscaleJobResponse = try await store.backend.post("/api/upscale", json: payload)
-            let jobId = jobResp.id
-
-            let deadline = Date().addingTimeInterval(600)
-            while Date() < deadline {
-                try await Task.sleep(nanoseconds: 500_000_000)
-                if Task.isCancelled { return }
-                do {
-                    let jobStatus: UpscaleJobStatus = try await store.backend.get("/api/jobs/\(jobId)")
-                    let state = jobStatus.state
-                    if let msg = jobStatus.message {
-                        progressMessage = msg
-                    }
-                    if state == "complete" {
-                        progressMessage = "Upscale complete!"
-                        await store.refresh()
-                        dismiss()
-                        return
-                    } else if state == "error" {
-                        errorMessage = jobStatus.message ?? "Upscale failed"
-                        return
-                    }
-                } catch {
-                    errorMessage = error.localizedDescription
-                    return
-                }
-            }
-            errorMessage = "Upscale timed out (10 minutes)."
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isRunning = false
+        await store.performUpscale(job: UpscaleJob(sourceGenerationId: sourceGeneration.id, scale: scale, softness: softness, seed: seed, projectId: sourceGeneration.projectId))
     }
+
 }
 
 func formatBytes(_ bytes: Int64) -> String {
