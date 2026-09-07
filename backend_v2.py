@@ -586,10 +586,15 @@ class LMStudioPromptHelper(PromptHelper):
                 {"role": "system", "content": PROMPT_HELPER_SYSTEM},
                 {"role": "user", "content": f"{instruction}\n\nOriginal prompt:\n{prompt}"},
             ],
-            "temperature": 0.25,
+            "temperature": 0,
             "max_tokens": 220,
             "stream": False,
         }
+        if re.search(r"qwen.?3\.6.*35b|qwen.*35b", model, re.I):
+            # This LM Studio MLX model ignores request-level thinking controls.
+            # 768 tokens still ended inside reasoning; allow room for the answer.
+            # Keep this budget local to the prompt helper, not model settings.
+            payload["max_tokens"] = 2048
         started = time.perf_counter()
         try:
             with self.request(
@@ -599,12 +604,16 @@ class LMStudioPromptHelper(PromptHelper):
             ) as response:
                 result = json.load(response)
             total = max(time.perf_counter() - started, 0.001)
-            improved = str(result["choices"][0]["message"]["content"]).strip()
+            choice = result["choices"][0]
+            content = choice["message"].get("content")
+            # Never use reasoning as a prompt or accept a truncated answer that
+            # may have lost one of the user's constraints. JSON null is not text.
+            if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
+                raise ValueError("Empty, invalid, or truncated helper response")
+            improved = content.strip()
             usage = result.get("usage") or {}
             tokens = usage.get("completion_tokens")
             tokens_per_second = (float(tokens) / total) if tokens else None
-            if not improved:
-                raise ValueError("Empty helper response")
             return PromptHelperResult(improved, model=model, tokens_per_second=tokens_per_second, token_count=tokens, total_time=total)
         except Exception:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")

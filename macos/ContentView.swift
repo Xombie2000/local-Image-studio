@@ -490,7 +490,7 @@ struct ComposerView: View {
                         Text("Light").tag("light"); Text("Normal").tag("normal"); Text("Strong").tag("strong")
                     }
                     .pickerStyle(.menu).frame(width: 130).disabled(!store.promptImprovement)
-                    if !store.promptHelper.available && store.promptImprovement {
+                    if !store.promptHelper.available && store.promptImprovement && store.promptImprovementNotice == nil {
                         Label("Original prompt will be used", systemImage: "info.circle")
                             .font(.caption2).foregroundStyle(.secondary)
                             .help("Prompt improvement unavailable — original prompt used")
@@ -500,6 +500,14 @@ struct ComposerView: View {
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
                 .font(.caption)
+
+                if let promptNotice = store.promptImprovementNotice {
+                    Label(promptNotice, systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("promptImprovementStatus")
+                }
 
                 if store.promptImprovement && (!store.workspace.improvedPrompt.isEmpty || store.selectedGeneration != nil) {
                     DisclosureGroup("Show Improved Prompt", isExpanded: $store.showImprovedPrompt) {

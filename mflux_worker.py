@@ -28,6 +28,20 @@ def emit(payload: dict[str, Any]) -> None:
     print(PROTOCOL_PREFIX + json.dumps(payload, separators=(",", ":")), flush=True)
 
 
+def log_telemetry(phase: str):
+    import resource
+    import mlx.core as mx
+    try:
+        active = int(mx.get_active_memory())
+    except Exception:
+        active = 0
+    try:
+        peak = int(mx.get_peak_memory())
+    except Exception:
+        peak = 0
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    print(f"TELEMETRY|{phase}|active={active}|peak={peak}|rss={rss}")
+
 def model_config_for(model_id: str):
     from mflux.models.common.config import ModelConfig
 
@@ -234,6 +248,7 @@ def upscale(command: dict[str, Any]) -> None:
         mx.reset_peak_memory()
         request_id = command["request_id"]
         params = command["params"]
+        log_telemetry("A")
         output_path = params["output_path"]
         image_path = params["image_path"]
         resolution_str = str(params.get("resolution", "2x"))
@@ -255,6 +270,7 @@ def upscale(command: dict[str, Any]) -> None:
             model_config=model_config,
             quantize=quantization,
         )
+        log_telemetry("B")
 
         emit(
             {
@@ -269,15 +285,28 @@ def upscale(command: dict[str, Any]) -> None:
         )
 
         started = time.perf_counter()
+        log_telemetry("C")
         result_image = model.generate_image(
             seed=int(params.get("seed", 42)),
             image_path=MPath(image_path),
             resolution=resolution,
             softness=softness,
         )
+        log_telemetry("D")
         result_image.save(path=output_path)
+        log_telemetry("E")
 
         elapsed = max(time.perf_counter() - started, 0.001)
+
+        # Explicit cleanup to reclaim memory
+        del result_image
+        del model
+        gc.collect()
+        try:
+            import mlx.core as mx
+            mx.clear_cache()
+        except Exception:
+            pass
 
         emit(
             {

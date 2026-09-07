@@ -19,6 +19,7 @@ final class StudioStore: ObservableObject {
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var notice: String?
+    @Published var promptImprovementNotice: String?
     @Published var showModels = false
     @Published var showUpscaleSheet = false
     @Published var showImprovedPrompt = false
@@ -101,6 +102,7 @@ final class StudioStore: ObservableObject {
     }
 
     func newImage() {
+        promptImprovementNotice = nil
         let carried = workspace
         selectedGeneration = nil
         selectedProjectId = nil
@@ -129,6 +131,7 @@ final class StudioStore: ObservableObject {
     }
 
     func select(_ generation: Generation) {
+        promptImprovementNotice = nil
         selectedGeneration = generation
         selectedProjectId = generation.projectId
         workspace = WorkspaceState(
@@ -206,6 +209,7 @@ final class StudioStore: ObservableObject {
         guard activeJob == nil else { return }
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
+        promptImprovementNotice = nil
         var payload: [String: Any] = [
             "prompt": prompt,
             "model_id": workspace.modelId,
@@ -248,11 +252,13 @@ final class StudioStore: ObservableObject {
                     if let status = job.modelStatus { modelStatus = status }
                     if let original = job.originalPrompt { workspace.originalPrompt = original }
                     if let improved = job.improvedPrompt { workspace.improvedPrompt = improved }
-                    if let promptNotice = job.promptNotice { notice = promptNotice }
+                    promptImprovementNotice = job.promptNotice
                     if job.state == "complete" {
                         let results = job.generations ?? job.generation.map { [$0] } ?? []
                         generations.insert(contentsOf: results.reversed(), at: 0)
                         if let first = results.first { select(first) }
+                        // Keep the fallback status visible after selecting the result.
+                        promptImprovementNotice = job.promptNotice
                         activeJob = nil
                         await refreshStatus()
                         return
