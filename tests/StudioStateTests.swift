@@ -32,8 +32,9 @@ struct StudioStateTests {
         let defaults = UserDefaults(suiteName: suite)!
         if CommandLine.arguments.contains("--restore") {
             let store = StudioStore(defaults: defaults)
-            precondition(store.selectedImageModel == "flux2_klein_9b")
-            precondition(store.workspace.modelId == "flux2_klein_9b")
+            precondition(store.selectedImageModel == "krea2_turbo")
+            precondition(store.workspace.modelId == "krea2_turbo")
+            precondition(store.workspace.steps == 8 && store.workspace.quantization == 8)
             precondition(store.helperModelID == "server/exact-chat-id")
             store.projects = [project("A"), project("B")]
             store.generations = [generation("image-A", project: "A")]
@@ -62,9 +63,15 @@ struct StudioStateTests {
         store.models = try decoder.decode([ModelInfo].self, from: Data("""
         [{"id":"flux2_klein_4b","label":"4B","purpose":"generation","tagline":"Fast","status":"Installed"},
          {"id":"flux2_klein_9b","label":"9B","purpose":"generation","tagline":"Quality","status":"Installed"},
+         {"id":"krea2_turbo","label":"Krea 2 Turbo","purpose":"generation","tagline":"12B · q8","status":"Installed"},
          {"id":"seedvr2_7b","label":"SeedVR2","purpose":"upscale","tagline":"Upscale","status":"Installed"}]
         """.utf8))
-        precondition(store.generationModels.count == 2)
+        precondition(store.generationModels.count == 3)
+        store.chooseImageModel("krea2_turbo")
+        precondition(store.workspace.modelId == "krea2_turbo")
+        precondition(store.workspace.steps == 8 && store.workspace.quantization == 8)
+        store.chooseImageModel("flux2_klein_4b")
+        precondition(store.workspace.steps == 4 && store.workspace.quantization == nil)
         store.chooseImageModel("flux2_klein_9b")
         store.chooseImageModel("seedvr2_7b")
         precondition(store.workspace.modelId == "flux2_klein_9b")
@@ -76,6 +83,7 @@ struct StudioStateTests {
         precondition(store.workspace.modelId == "flux2_klein_9b")
         checkEnhancement(store)
         checkProjects(store)
+        store.chooseImageModel("krea2_turbo")
         defaults.synchronize()
         print("PASS: fit geometry, purpose filtering, independent selection and New Image state")
     }

@@ -49,6 +49,8 @@ def model_config_for(model_id: str):
         return ModelConfig.flux2_klein_4b()
     if model_id == "flux2_klein_9b":
         return ModelConfig.flux2_klein_9b()
+    if model_id == "krea2_turbo":
+        return ModelConfig.krea2()
     raise ValueError("Unsupported model.")
 
 
@@ -125,6 +127,15 @@ def active_memory() -> int | None:
         return None
 
 
+def cache_memory() -> int | None:
+    try:
+        import mlx.core as mx
+
+        return int(mx.get_cache_memory())
+    except Exception:
+        return None
+
+
 def ensure_model(params: dict[str, Any], request_id: str):
     global MODEL, MODEL_KEY, MODEL_ID
     model_id = params["model_id"]
@@ -150,7 +161,13 @@ def ensure_model(params: dict[str, Any], request_id: str):
         unload(request_id)
     emit({"event": "status", "request_id": request_id, "status": "loading", "model_id": model_id})
     started = time.perf_counter()
-    if reference:
+    if model_id == "krea2_turbo":
+        if reference:
+            raise ValueError("Krea 2 Turbo reference editing is not supported in Local Image Studio.")
+        from mflux.models.krea2 import Krea2
+
+        model_class = Krea2
+    elif reference:
         from mflux.models.flux2.variants import Flux2KleinEdit
 
         model_class = Flux2KleinEdit
@@ -213,18 +230,32 @@ def generate(command: dict[str, Any]) -> None:
                 image = model.generate_image(**common)
             image.save(path=output)
             elapsed = max(time.perf_counter() - started, 0.001)
+            result_peak_memory = peak_memory()
+            result_active_memory = active_memory()
             results.append(
                 {
                     "output": output,
                     "seed": seed,
                     "generation_time": elapsed,
-                    "peak_memory_bytes": peak_memory(),
-                    "active_memory_bytes": active_memory(),
+                    "peak_memory_bytes": result_peak_memory,
+                    "active_memory_bytes": result_active_memory,
                 }
             )
+            del image
             gc.collect()
             mx.clear_cache()
-        emit({"event": "result", "request_id": request_id, "results": results, "model_id": MODEL_ID})
+        completed_model_id = MODEL_ID
+        if params.get("unload_after"):
+            # Drop the function-local owner before unload() clears the global
+            # owner; otherwise MLX cannot reclaim Krea until this call returns.
+            del model
+            unload(request_id)
+        post_cleanup_active = active_memory()
+        post_cleanup_cache = cache_memory()
+        for result in results:
+            result["post_cleanup_active_memory_bytes"] = post_cleanup_active
+            result["post_cleanup_cache_memory_bytes"] = post_cleanup_cache
+        emit({"event": "result", "request_id": request_id, "results": results, "model_id": completed_model_id})
     except Exception as error:
         emit(
             {
@@ -352,6 +383,7 @@ def main() -> int:
                         "status": "loaded" if MODEL is not None else "unloaded",
                         "model_id": MODEL_ID,
                         "active_memory_bytes": active_memory(),
+                        "cache_memory_bytes": cache_memory(),
                     }
                 )
             elif action == "upscale":

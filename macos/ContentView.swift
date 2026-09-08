@@ -27,7 +27,9 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Text("Generate with:").font(.subheadline).foregroundStyle(.secondary)
                     Picker("Next generation model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
-                        ForEach(store.generationModels) { Text($0.label).tag($0.id) }
+                        ForEach(store.generationModels) { model in
+                            Text(model.status == "Installed" ? model.label : "\(model.label) (Unavailable)").tag(model.id)
+                        }
                     }.labelsHidden().frame(maxWidth: 205)
                         .help("Model for the next generation. The selected image’s model is shown in Image Info.")
                         .accessibilityLabel("Next generation model")
@@ -512,7 +514,9 @@ struct ComposerView: View {
                 }
                 Spacer()
                 Button { store.chooseReferenceImage() } label: { Image(systemName: "paperclip") }
-                    .help("Attach reference image").accessibilityLabel("Attach reference image")
+                    .help(store.workspace.modelId == "krea2_turbo" ? "Krea reference editing is not available; choose a FLUX model." : "Attach reference image")
+                    .accessibilityLabel("Attach reference image")
+                    .disabled(store.workspace.modelId == "krea2_turbo")
             }
             TextEditor(text: $store.workspace.originalPrompt)
                 .font(.body).scrollContentBackground(.hidden)
@@ -643,9 +647,13 @@ struct InspectorView: View {
                 } else {
                     Section("Generation") {
                         Picker("Image Model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
-                            ForEach(store.generationModels) { Text($0.label).tag($0.id) }
+                            ForEach(store.generationModels) { model in
+                                Text(model.status == "Installed" ? model.label : "\(model.label) (Unavailable)").tag(model.id)
+                            }
                         }
                         Picker("Resolution", selection: aspectBinding) {
+                            Text("Square · 512 × 512").tag("square512")
+                            Text("Square · 768 × 768").tag("square768")
                             Text("Square · 1024 × 1024").tag("square")
                             Text("4:3 · 1152 × 864").tag("4:3")
                             Text("3:4 · 864 × 1152").tag("3:4")
@@ -659,6 +667,10 @@ struct InspectorView: View {
                             TextField("Height", value: $store.workspace.height, format: .number)
                         }
                         Stepper("Steps: \(store.workspace.steps)", value: $store.workspace.steps, in: 1...100)
+                        if store.workspace.modelId == "krea2_turbo" {
+                            Text("Krea 2 Turbo defaults to 8 steps and 8-bit quantization.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Toggle("Random seed", isOn: $store.workspace.randomSeed)
                         if !store.workspace.randomSeed { TextField("Seed", value: $store.workspace.seed, format: .number) }
                         Picker("Project", selection: Binding(get: { store.workspace.projectId }, set: { store.chooseDraftProject($0) })) {
@@ -691,6 +703,8 @@ struct InspectorView: View {
     private var aspectBinding: Binding<String> {
         Binding {
             switch (store.workspace.width, store.workspace.height) {
+            case (512, 512): return "square512"
+            case (768, 768): return "square768"
             case (1024, 1024): return "square"
             case (1152, 864): return "4:3"
             case (864, 1152): return "3:4"
@@ -700,6 +714,8 @@ struct InspectorView: View {
             }
         } set: { value in
             switch value {
+            case "square512": store.workspace.width = 512; store.workspace.height = 512
+            case "square768": store.workspace.width = 768; store.workspace.height = 768
             case "square": store.workspace.width = 1024; store.workspace.height = 1024
             case "4:3": store.workspace.width = 1152; store.workspace.height = 864
             case "3:4": store.workspace.width = 864; store.workspace.height = 1152

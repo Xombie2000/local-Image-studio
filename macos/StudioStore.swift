@@ -36,8 +36,10 @@ final class StudioStore: ObservableObject {
 
     func chooseImageModel(_ id: String) {
         guard generationModels.contains(where: { $0.id == id }) else { return }
+        let previousModel = workspace.modelId
         selectedImageModel = id
         workspace.modelId = id
+        applyImageModelDefaults(for: id, replacingDefaultsFor: previousModel)
     }
 
     func chooseHelper(_ id: String) {
@@ -51,6 +53,17 @@ final class StudioStore: ObservableObject {
             helperModelID = promptImprovement ? preferred : "off"
         }
         workspace.modelId = selectedImageModel
+        applyImageModelDefaults(for: selectedImageModel, replacingDefaultsFor: nil)
+    }
+
+    private func applyImageModelDefaults(for modelId: String, replacingDefaultsFor previousModel: String?) {
+        if modelId == "krea2_turbo" {
+            workspace.steps = 8
+            workspace.quantization = 8
+        } else if previousModel == "krea2_turbo" {
+            workspace.steps = 4
+            workspace.quantization = nil
+        }
     }
     @Published var activeJob: GenerationJob?
     @Published var modelStatus = ModelRuntimeStatus.unloaded
@@ -108,6 +121,10 @@ final class StudioStore: ObservableObject {
         selectedProjectId = defaults.string(forKey: "selectedProjectID").flatMap { $0.isEmpty ? nil : $0 }
         lastHelperMetrics = defaults.data(forKey: "lastEnhanceMetrics").flatMap { try? JSONDecoder().decode(PromptHelperMetrics.self, from: $0) }
         workspace.modelId = selectedImageModel
+        if selectedImageModel == "krea2_turbo" {
+            workspace.steps = 8
+            workspace.quantization = 8
+        }
         workspace.projectId = selectedProjectId
     }
 

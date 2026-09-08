@@ -50,6 +50,42 @@ THUMBNAILS_DIR = v1.THUMBNAILS_DIR
 REFERENCES_DIR = v1.REFERENCES_DIR
 LORAS_DIR = v1.LORAS_DIR
 DATABASE_PATH = v1.DATABASE_PATH
+KREA_MODEL_ID = "krea2_turbo"
+KREA_REPO_ID = "krea/Krea-2-Turbo"
+KREA_REQUIRED_FILES = (
+    "turbo.safetensors",
+    "tokenizer/tokenizer.json",
+    "text_encoder/config.json",
+    "text_encoder/model.safetensors",
+    "vae/config.json",
+    "vae/diffusion_pytorch_model.safetensors",
+)
+v1.MODEL_DEFINITIONS[KREA_MODEL_ID] = {
+    "label": "Krea 2 Turbo",
+    "tagline": "12B · q8",
+    "mflux_name": "krea-2",
+    "repo_id": KREA_REPO_ID,
+    "cache_name": "models--krea--Krea-2-Turbo",
+    "approx_size": "33 GB",
+}
+_legacy_model_is_installed = v1.model_is_installed
+
+
+def model_is_installed(model_id: str) -> bool:
+    """Recognize complete cached snapshots without contacting Hugging Face."""
+    if model_id != KREA_MODEL_ID:
+        return _legacy_model_is_installed(model_id)
+    cache = v1.model_cache_path(model_id)
+    try:
+        revision = (cache / "refs/main").read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    snapshot = cache / "snapshots" / revision
+    return snapshot.is_dir() and all((snapshot / relative_path).is_file() for relative_path in KREA_REQUIRED_FILES)
+
+
+# Keep the imported v1 validator and public registry on the same generic check.
+v1.model_is_installed = model_is_installed
 PROJECT_ARCHIVES_DIR = GENERATIONS_DIR / "Archives"
 WORKER_PATH = RESOURCE_DIR / "mflux_worker.py"
 MFLUX_PYTHON = Path(os.environ.get("LIS_MFLUX_PYTHON", Path.home() / ".local/share/uv/tools/mflux/bin/python"))
@@ -1169,7 +1205,13 @@ def schedule_retention(mode: str) -> None:
 
 
 def validate_v2_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    config = v1.validate_generation_payload(payload)
+    normalized_payload = dict(payload)
+    if str(normalized_payload.get("model_id", "flux2_klein_4b")) == KREA_MODEL_ID:
+        normalized_payload.setdefault("steps", 8)
+        normalized_payload.setdefault("quantization", 8)
+        if any(normalized_payload.get(key) for key in ("reference_generation_id", "reference_data", "reference_path")):
+            raise ValueError("Krea 2 Turbo reference editing is not supported in Local Image Studio. Use a FLUX model for edits.")
+    config = v1.validate_generation_payload(normalized_payload)
     # The native editor is authoritative in the explicit Enhance workflow.
     # Keep legacy API behavior for callers that have not opted into this contract.
     prompt_is_final = payload.get("prompt_is_final") is True
@@ -1241,6 +1283,8 @@ def worker_event_to_job(job_id: str, event: dict[str, Any]) -> None:
             model_id = event.get("model_id")
             if model_id == "seedvr2_7b":
                 short = "SeedVR2 7B"
+            elif model_id == KREA_MODEL_ID:
+                short = "Krea 2 Turbo"
             else:
                 short = "9B" if model_id == "flux2_klein_9b" else "4B"
             if status == "loading":
@@ -1346,6 +1390,9 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
                 "reference_paths": [str(reference_path)] if reference_path else [],
                 "lora_paths": [str(config["lora_path"])] if config["lora_path"] else [],
                 "lora_scales": [config["lora_scale"]] if config["lora_path"] else [],
+                # Krea is substantially larger than Klein. Automatic retention
+                # releases it immediately; an explicit Keep Loaded preference wins.
+                "unload_after": config["model_id"] == KREA_MODEL_ID and config["model_retention"] != "keep",
             }
             cancel_idle_timer()
             results, peak_rss = WORKER.generate(params, lambda event: worker_event_to_job(job_id, event))
@@ -1388,6 +1435,7 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
             assert row
             public_results.append(public_generation(row))
         with JOBS_LOCK:
+            first_result = results[0] if results else {}
             JOBS[job_id].update(
                 {
                     "state": "complete",
@@ -1396,12 +1444,15 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
                     "generations": public_results,
                     "generation": public_results[0],
                     "model_status": WORKER.public_status(),
+                    "post_cleanup_active_memory_bytes": first_result.get("post_cleanup_active_memory_bytes"),
+                    "post_cleanup_cache_memory_bytes": first_result.get("post_cleanup_cache_memory_bytes"),
                 }
             )
         # v2 retains user-supplied references so forks can reuse the same local
         # file without another copy. Failed jobs still clean up their upload.
         delete_reference = False
-        schedule_retention(config["model_retention"])
+        if config["model_id"] != KREA_MODEL_ID or config["model_retention"] == "keep":
+            schedule_retention(config["model_retention"])
     except Exception as error:
         for path in created_paths + created_thumbnails:
             with contextlib.suppress(OSError):
