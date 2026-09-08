@@ -3,6 +3,7 @@ import io
 import json
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +11,14 @@ import backend_v2 as backend
 
 
 class ModelSelectionTests(unittest.TestCase):
+    def test_parent_watchdog_requests_shutdown_after_reparenting(self):
+        backend.SHUTTING_DOWN.clear()
+        with mock.patch.object(backend.os, "getppid", return_value=999), mock.patch.object(
+            backend, "request_shutdown"
+        ) as shutdown:
+            backend.watch_parent(parent_pid=123, poll_interval=0)
+        shutdown.assert_called_once_with()
+
     def test_discovery_filters_non_chat_and_deduplicates(self):
         items = [{"id": name} for name in ["qwen/qwen3-4b-2507", "google/gemma-4", "flux2", "seedvr2_7b", "text-embedding-nomic", "qwen/qwen3-4b-2507"]]
         items += [{"id": "unknown", "type": "embedding"}, {"id": "audio", "capabilities": ["audio"]}, {"id": "custom-chat", "capabilities": ["chat"]}]

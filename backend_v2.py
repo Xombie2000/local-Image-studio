@@ -1740,7 +1740,9 @@ class V2Server(ThreadingHTTPServer):
         super().__init__(address, V2Handler)
 
 
-def signal_shutdown(_signum: int, _frame: Any) -> None:
+def request_shutdown() -> None:
+    if SHUTTING_DOWN.is_set():
+        return
     SHUTTING_DOWN.set()
     cancel_idle_timer()
     WORKER.shutdown()
@@ -1748,11 +1750,24 @@ def signal_shutdown(_signum: int, _frame: Any) -> None:
         threading.Thread(target=SERVER.shutdown, daemon=True).start()
 
 
+def signal_shutdown(_signum: int, _frame: Any) -> None:
+    request_shutdown()
+
+
+def watch_parent(parent_pid: int, poll_interval: float = 1.0) -> None:
+    """Stop the private backend if its owning GUI process disappears."""
+    while not SHUTTING_DOWN.wait(poll_interval):
+        if os.getppid() != parent_pid:
+            request_shutdown()
+            return
+
+
 def main() -> int:
     global SERVER
     parser = argparse.ArgumentParser(description=f"{APP_NAME} v2")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--token", default=None)
+    parser.add_argument("--parent-pid", type=int, default=None)
     arguments = parser.parse_args()
     ensure_directories()
     initialize_database()
@@ -1760,6 +1775,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, signal_shutdown)
     signal.signal(signal.SIGINT, signal_shutdown)
     SERVER = V2Server(("127.0.0.1", arguments.port), token)
+    if arguments.parent_pid is not None:
+        threading.Thread(target=watch_parent, args=(arguments.parent_pid,), daemon=True).start()
     print(f"READY {SERVER.server_address[1]} {token}", flush=True)
     try:
         SERVER.serve_forever(poll_interval=0.2)

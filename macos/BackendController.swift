@@ -60,7 +60,12 @@ final class BackendController: ObservableObject {
             process.standardError = FileHandle.standardError
         }
         process.executableURL = python
-        process.arguments = [backend.path, "--port", "0", "--token", token]
+        process.arguments = [
+            backend.path,
+            "--port", "0",
+            "--token", token,
+            "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
+        ]
         process.currentDirectoryURL = resources
         process.standardOutput = stdoutPipe
         var environment = ProcessInfo.processInfo.environment
