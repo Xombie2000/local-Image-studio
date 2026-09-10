@@ -203,7 +203,7 @@ struct StudioStateTests {
         checkPayload(raw)
         store.chooseHelper("off")
         checkPayload(raw)
-        store.chooseHelper("server/exact-chat-id")
+        store.chooseHelper("lms::server/exact-chat-id")
         store.applyEnhancement(success, original: raw)
         let secondOriginal = store.workspace.originalPrompt + " manually edited"
         store.workspace.originalPrompt = secondOriginal
