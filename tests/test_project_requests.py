@@ -19,17 +19,32 @@ class ProjectRequestTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
+        hf_cache = cls.root / "hf-cache"
+        model_cache = hf_cache / "models--black-forest-labs--FLUX.2-klein-4B"
+        snapshot = model_cache / "snapshots/test-revision"
+        for relative_path in (
+            "transformer/config.json",
+            "text_encoder/config.json",
+            "vae/config.json",
+        ):
+            path = snapshot / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        (model_cache / "refs").mkdir(parents=True, exist_ok=True)
+        (model_cache / "refs/main").write_text("test-revision", encoding="utf-8")
         env = dict(os.environ, LIS_APP_SUPPORT=str(cls.root / "support"),
-                   LIS_GENERATIONS_DIR=str(cls.root / "images"), LIS_TEST_MODE="1", PYTHONUNBUFFERED="1")
+                   LIS_GENERATIONS_DIR=str(cls.root / "images"), HF_HUB_CACHE=str(hf_cache),
+                   LIS_TEST_MODE="1", PYTHONUNBUFFERED="1")
         cls.process = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve().parents[1] / "backend_v2.py"), "--port", "0", "--token", "project-tests"],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         cls.addClassCleanup(cls.cleanup)
         if not select.select([cls.process.stdout], [], [], 20)[0]:
             raise RuntimeError("Project test backend did not start")
         ready = cls.process.stdout.readline().split()
         if not ready or ready[0] != "READY":
-            raise RuntimeError(f"Unexpected startup: {ready}")
+            diagnostics = cls.process.stderr.read() if cls.process.poll() is not None else ""
+            raise RuntimeError(f"Unexpected startup: {ready}\n{diagnostics}")
         cls.url = f"http://127.0.0.1:{ready[1]}"
 
     @classmethod
@@ -41,6 +56,7 @@ class ProjectRequestTests(unittest.TestCase):
             cls.process.kill()
             cls.process.wait()
         cls.process.stdout.close()
+        cls.process.stderr.close()
         cls.temp.cleanup()
 
     def request(self, path, data=None, method=None):

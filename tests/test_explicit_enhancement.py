@@ -52,8 +52,9 @@ class ExplicitEnhancementTests(unittest.TestCase):
 
     def test_final_prompt_disables_both_hidden_rewrite_paths_and_keeps_whitespace(self):
         original = "  current editor: 日本語\nexactly eight wheels; no visible weapons  "
-        config = backend.validate_v2_payload({"prompt": original, "prompt_is_final": True,
-            "prompt_improvement": True, "improved_prompt_override": "hidden old prompt"})
+        with patch.object(backend.v1, "model_is_installed", return_value=True):
+            config = backend.validate_v2_payload({"prompt": original, "prompt_is_final": True,
+                "prompt_improvement": True, "improved_prompt_override": "hidden old prompt"})
         self.assertEqual(config["prompt"], original)
         self.assertFalse(config["prompt_improvement"])
         self.assertIsNone(config["improved_prompt_override"])

@@ -163,6 +163,7 @@ class PromptHelperTests(unittest.TestCase):
             stack.enter_context(patch.object(backend, "schedule_retention"))
             stack.enter_context(patch.object(backend, "PROMPT_HELPER", self.helper))
             stack.enter_context(patch.object(backend.WORKER, "generate", side_effect=AssertionError("GPU work in unit test")))
+            stack.enter_context(patch.object(backend.v1, "model_is_installed", return_value=True))
             backend.ensure_directories()
             backend.initialize_database()
             for index, content in enumerate(("", VEHICLE_RESULT)):

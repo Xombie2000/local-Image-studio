@@ -54,7 +54,8 @@ class ModelSelectionTests(unittest.TestCase):
         request.assert_not_called()
 
     def test_payload_preserves_each_image_and_helper_selection(self):
-        for model in ("flux2_klein_4b", "flux2_klein_9b"):
-            value = backend.validate_v2_payload({"prompt": "cat", "model_id": model, "prompt_helper_model": "chosen-chat"})
-            self.assertEqual(value["model_id"], model)
-            self.assertEqual(value["prompt_helper_model"], "chosen-chat")
+        with patch.object(backend.v1, "model_is_installed", return_value=True):
+            for model in ("flux2_klein_4b", "flux2_klein_9b"):
+                value = backend.validate_v2_payload({"prompt": "cat", "model_id": model, "prompt_helper_model": "chosen-chat"})
+                self.assertEqual(value["model_id"], model)
+                self.assertEqual(value["prompt_helper_model"], "chosen-chat")
