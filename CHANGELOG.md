@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Discover prompt-helper models from both LM Studio and oMLX, label them by provider, and route each request to the selected local server.
+
 ## 2.0.0-preview.1
 
 - Replaced the web wrapper with a native SwiftUI workspace.

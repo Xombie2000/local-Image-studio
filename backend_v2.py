@@ -620,6 +620,13 @@ class PromptHelper:
 
 
 class LMStudioPromptHelper(PromptHelper):
+    providers = {
+        "lms": {"label": "LMS", "endpoint": "http://127.0.0.1:1234"},
+        "omlx": {"label": "oMLX", "endpoint": "http://127.0.0.1:8000"},
+    }
+    model_separator = "::"
+    # Retained for compatibility with tests and callers that used the original
+    # single-provider helper directly.
     endpoint = "http://127.0.0.1:1234"
 
     @staticmethod
@@ -630,13 +637,36 @@ class LMStudioPromptHelper(PromptHelper):
 
     @classmethod
     def available_models(cls) -> list[str]:
-        try:
-            with cls.request(f"{cls.endpoint}/v1/models", timeout=0.45) as response:
-                payload = json.load(response)
-            return list(dict.fromkeys(str(item["id"]) for item in payload.get("data", [])
-                                      if cls.is_chat_model(item)))
-        except Exception:
-            return []
+        models: list[str] = []
+        for provider_id, provider in cls.providers.items():
+            try:
+                with cls.request(f"{provider['endpoint']}/v1/models", timeout=0.45) as response:
+                    payload = json.load(response)
+                models.extend(
+                    cls.encode_model(provider_id, str(item["id"]))
+                    for item in payload.get("data", [])
+                    if cls.is_chat_model(item)
+                )
+            except Exception:
+                continue
+        return list(dict.fromkeys(models))
+
+    @classmethod
+    def encode_model(cls, provider_id: str, model_id: str) -> str:
+        return f"{provider_id}{cls.model_separator}{model_id}"
+
+    @classmethod
+    def split_model(cls, selection: str) -> tuple[str, str]:
+        if cls.model_separator in selection:
+            provider_id, model_id = selection.split(cls.model_separator, 1)
+            if provider_id in cls.providers and model_id:
+                return provider_id, model_id
+        # Preserve preferences saved by the original LM Studio-only release.
+        return "lms", selection
+
+    @classmethod
+    def bare_model(cls, selection: str) -> str:
+        return cls.split_model(selection)[1]
 
     @staticmethod
     def is_chat_model(item: dict[str, Any]) -> bool:
@@ -659,22 +689,30 @@ class LMStudioPromptHelper(PromptHelper):
 
     @staticmethod
     def choose_model(models: list[str]) -> str | None:
-        preferred = [model for model in models if re.search(r"qwen.*3[-_]?4b.*2507", model, re.I)]
+        preferred = [model for model in models if re.search(r"qwen.*3[-_]?4b.*2507", LMStudioPromptHelper.bare_model(model), re.I)]
         if preferred:
             return preferred[0]
-        small = [model for model in models if re.search(r"(?:^|[-_])(4|5|6|7|8)b(?:[-_]|$)", model, re.I) and re.search(r"instruct|qwen|mistral|llama", model, re.I)]
+        small = [model for model in models if re.search(r"(?:^|[-_])(4|5|6|7|8)b(?:[-_]|$)", LMStudioPromptHelper.bare_model(model), re.I) and re.search(r"instruct|qwen|mistral|llama", LMStudioPromptHelper.bare_model(model), re.I)]
         if small:
             return small[0]
-        fallback = [model for model in models if re.search(r"qwen.?3\.6.*35b|qwen.*35b", model, re.I)]
+        fallback = [model for model in models if re.search(r"qwen.?3\.6.*35b|qwen.*35b", LMStudioPromptHelper.bare_model(model), re.I)]
         return fallback[0] if fallback else None
 
     def improve(self, prompt: str, strength: str, model_id: str | None = None) -> PromptHelperResult:
         if model_id == "off":
             return PromptHelperResult(prompt)
         models = self.available_models()
-        model = (model_id if model_id in models else None) if model_id is not None else self.choose_model(models)
-        if not model:
+        selection = None
+        if model_id is not None:
+            selection = model_id if model_id in models else next(
+                (candidate for candidate in models if self.bare_model(candidate) == model_id), None
+            )
+        else:
+            selection = self.choose_model(models)
+        if not selection:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
+        provider_id, model = self.split_model(selection)
+        endpoint = self.providers[provider_id]["endpoint"]
         instruction = {
             "light": "Make only light refinements. Stay very close to the original wording and meaning.",
             "normal": "Make a concise enhancement using only the original subject matter and the permitted presentation categories. Add no named details, parts, or surroundings.",
@@ -705,7 +743,7 @@ class LMStudioPromptHelper(PromptHelper):
         started = time.perf_counter()
         try:
             with self.request(
-                f"{self.endpoint}/v1/chat/completions",
+                f"{endpoint}/v1/chat/completions",
                 json.dumps(payload).encode("utf-8"),
                 timeout=45,
             ) as response:
@@ -725,7 +763,7 @@ class LMStudioPromptHelper(PromptHelper):
             usage = result.get("usage") or {}
             tokens = usage.get("completion_tokens")
             tokens_per_second = (float(tokens) / total) if tokens else None
-            return PromptHelperResult(improved, model=model, tokens_per_second=tokens_per_second, token_count=tokens, total_time=total)
+            return PromptHelperResult(improved, model=selection, tokens_per_second=tokens_per_second, token_count=tokens, total_time=total)
         except Exception:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
 

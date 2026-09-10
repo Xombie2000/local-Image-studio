@@ -20,6 +20,8 @@ struct StudioStateTests {
         precondition(upscale.requestPayload["source_generation_id"] as? String == "source")
         precondition(UpscaleJob(sourceGenerationId: "ungrouped").requestPayload["project_id"] == nil)
         precondition(HelperPresentation.name(for: "qwen/qwen3-4b-2507") == "Qwen3 4B Instruct")
+        precondition(HelperPresentation.name(for: "lms::qwen/qwen3-4b-2507") == "LMS — Qwen3 4B Instruct")
+        precondition(HelperPresentation.name(for: "omlx::qwen/custom:thinking") == "oMLX — Custom:Thinking")
         precondition(!HelperPresentation.name(for: "qwen/qwen3-4b-2507").contains("6-bit"))
         precondition(HelperPresentation.name(for: "organization/custom-model") == "Custom Model")
         let missingMetrics = PromptHelperMetrics(model: "qwen/qwen3-4b-2507", tokensPerSecond: 0, timeToFirstToken: nil, tokenCount: 0, totalTime: nil)
@@ -52,6 +54,9 @@ struct StudioStateTests {
         precondition(!store.promptImprovement)
         store.chooseHelper("server/exact-chat-id")
         precondition(store.promptImprovement && store.helperUnavailable)
+        store.promptHelper = PromptHelperAvailability(models: ["lms::server/exact-chat-id", "omlx::server/exact-chat-id"], available: true, model: "lms::server/exact-chat-id", notice: nil)
+        store.restoreModelPreferences()
+        precondition(store.helperModelID == "lms::server/exact-chat-id" && !store.helperUnavailable)
         store.chooseImageModel("krea2_turbo")
         store.select(generation("krea-image", project: nil, model: "krea2_turbo"))
         store.editSelected()
@@ -72,7 +77,7 @@ struct StudioStateTests {
         precondition(restored.selectedImageModel == "krea2_turbo")
         precondition(restored.workspace.modelId == "krea2_turbo")
         precondition(restored.workspace.steps == 8 && restored.workspace.quantization == 8)
-        precondition(restored.helperModelID == "server/exact-chat-id")
+        precondition(restored.helperModelID == "lms::server/exact-chat-id")
         restored.projects = [project("A"), project("B")]
         restored.generations = [generation("image-A", project: "A")]
         restored.restoreProjectSelection()

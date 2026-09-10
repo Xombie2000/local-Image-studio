@@ -4,6 +4,8 @@
 
 Local Image Studio is an experimental, local-only macOS interface for image generation with MFLUX. It provides a native SwiftUI library and editor for FLUX.2 Klein and Krea 2 Turbo, plus SeedVR2 upscaling.
 
+Optional prompt enhancement discovers local chat models from both LM Studio (`127.0.0.1:1234`) and oMLX (`127.0.0.1:8000`). Models from either running server appear together in the picker with an `LMS —` or `oMLX —` prefix, and enhancement requests are routed back to the selected server.
+
 This repository currently represents a **developer preview for Apple Silicon**, not a notarized end-user release. It expects models and an MFLUX runtime to already exist on the Mac and never downloads models from the app.
 
 The app is available in English and Japanese. It follows the macOS language preference for the app and falls back to English.

@@ -245,6 +245,16 @@ enum CanvasSizing {
 // Presentation only: picker tags and request IDs always retain the server ID.
 enum HelperPresentation {
     static func name(for id: String) -> String {
+        let parts = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        let provider: String?
+        let modelID: String
+        if parts.count == 3, parts[1].isEmpty {
+            provider = parts[0] == "lms" ? "LMS" : parts[0] == "omlx" ? "oMLX" : String(parts[0])
+            modelID = String(parts[2])
+        } else {
+            provider = nil
+            modelID = id
+        }
         let known = [
             "qwen/qwen3-4b-2507": "Qwen3 4B Instruct",
             "qwen3.6-35b-a3b-mlx": "Qwen3.6 35B A3B",
@@ -252,12 +262,17 @@ enum HelperPresentation {
             "ternary-bonsai-27b-mlx": "Ternary Bonsai 27B",
             "muse-glimmer-30b": "Muse Glimmer 30B"
         ]
-        if let name = known[id.lowercased()] { return name }
-        // A v1 model listing need not include quantization or a marketing name.
-        // Humanize unfamiliar IDs without inferring missing model properties.
-        return (id.split(separator: "/").last.map(String.init) ?? id)
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: " ").capitalized
+        let modelName: String
+        if let name = known[modelID.lowercased()] {
+            modelName = name
+        } else {
+            // A v1 model listing need not include quantization or a marketing name.
+            // Humanize unfamiliar IDs without inferring missing model properties.
+            modelName = (modelID.split(separator: "/").last.map(String.init) ?? modelID)
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "-", with: " ").capitalized
+        }
+        return provider.map { "\($0) — \(modelName)" } ?? modelName
     }
 }
 

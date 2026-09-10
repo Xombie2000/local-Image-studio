@@ -48,7 +48,13 @@ final class StudioStore: ObservableObject {
         promptImprovementNotice = nil
     }
 
-    private func restoreModelPreferences() {
+    func restoreModelPreferences() {
+        if !helperModelID.isEmpty, helperModelID != "off", !promptHelper.models.contains(helperModelID),
+           let migrated = promptHelper.models.first(where: { $0.hasSuffix("::\(helperModelID)") }) {
+            // v2.0.0-preview.1 stored LM Studio's bare model ID. Prefer the
+            // first matching provider (LMS discovery order) after upgrading.
+            helperModelID = migrated
+        }
         if helperModelID.isEmpty, let preferred = promptHelper.model {
             helperModelID = promptImprovement ? preferred : "off"
         }

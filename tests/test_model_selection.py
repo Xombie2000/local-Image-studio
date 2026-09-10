@@ -19,11 +19,33 @@ class ModelSelectionTests(unittest.TestCase):
             backend.watch_parent(parent_pid=123, poll_interval=0)
         shutdown.assert_called_once_with()
 
-    def test_discovery_filters_non_chat_and_deduplicates(self):
-        items = [{"id": name} for name in ["qwen/qwen3-4b-2507", "google/gemma-4", "flux2", "seedvr2_7b", "text-embedding-nomic", "qwen/qwen3-4b-2507"]]
-        items += [{"id": "unknown", "type": "embedding"}, {"id": "audio", "capabilities": ["audio"]}, {"id": "custom-chat", "capabilities": ["chat"]}]
-        with patch.object(backend.LMStudioPromptHelper, "request", return_value=io.BytesIO(json.dumps({"data": items}).encode())):
-            self.assertEqual(backend.LMStudioPromptHelper.available_models(), ["qwen/qwen3-4b-2507", "google/gemma-4", "custom-chat"])
+    def test_discovery_merges_providers_filters_non_chat_and_keeps_duplicate_ids(self):
+        lms_items = [{"id": name} for name in ["qwen/qwen3-4b-2507", "flux2", "text-embedding-nomic", "qwen/qwen3-4b-2507"]]
+        lms_items += [{"id": "unknown", "type": "embedding"}, {"id": "custom-chat", "capabilities": ["chat"]}]
+        omlx_items = [{"id": "qwen/qwen3-4b-2507"}, {"id": "google/gemma-4"}, {"id": "audio", "capabilities": ["audio"]}]
+
+        def response_for(url, *_args, **_kwargs):
+            items = lms_items if ":1234/" in url else omlx_items
+            return io.BytesIO(json.dumps({"data": items}).encode())
+
+        with patch.object(backend.LMStudioPromptHelper, "request", side_effect=response_for):
+            self.assertEqual(backend.LMStudioPromptHelper.available_models(), [
+                "lms::qwen/qwen3-4b-2507",
+                "lms::custom-chat",
+                "omlx::qwen/qwen3-4b-2507",
+                "omlx::google/gemma-4",
+            ])
+
+    def test_discovery_tolerates_either_server_being_offline(self):
+        payload = io.BytesIO(json.dumps({"data": [{"id": "local-chat"}]}).encode())
+
+        def only_omlx(url, *_args, **_kwargs):
+            if ":1234/" in url:
+                raise OSError("LM Studio is offline")
+            return payload
+
+        with patch.object(backend.LMStudioPromptHelper, "request", side_effect=only_omlx):
+            self.assertEqual(backend.LMStudioPromptHelper.available_models(), ["omlx::local-chat"])
 
     def test_preferred_model_uses_discovered_exact_id(self):
         self.assertEqual(backend.LMStudioPromptHelper.choose_model(["qwen3.6-35b-a3b-mlx", "qwen/qwen3-4b-2507"]), "qwen/qwen3-4b-2507")
@@ -36,6 +58,17 @@ class ModelSelectionTests(unittest.TestCase):
         self.assertEqual(json.loads(request.call_args.args[1])["model"], "google/gemma-4")
         self.assertEqual(result.model, "google/gemma-4")
         self.assertEqual(result.token_count, 8)
+
+    def test_omlx_selection_routes_raw_model_id_to_omlx(self):
+        helper = backend.LMStudioPromptHelper()
+        payload = {"choices": [{"message": {"content": "A cat on a fence."}, "finish_reason": "stop"}]}
+        selection = "omlx::qwen/local-chat"
+        with patch.object(helper, "available_models", return_value=[selection]), \
+             patch.object(helper, "request", return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+            result = helper.improve("cat", "normal", model_id=selection)
+        self.assertEqual(request.call_args.args[0], "http://127.0.0.1:8000/v1/chat/completions")
+        self.assertEqual(json.loads(request.call_args.args[1])["model"], "qwen/local-chat")
+        self.assertEqual(result.model, selection)
 
     def test_missing_selection_does_not_silently_switch_models(self):
         helper = backend.LMStudioPromptHelper()
