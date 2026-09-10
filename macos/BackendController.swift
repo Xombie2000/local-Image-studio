@@ -7,7 +7,7 @@ enum BackendError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notReady: return "The private backend is not ready."
+        case .notReady: return L10n.text("The private backend is not ready.")
         case .message(let message): return message
         }
     }
@@ -38,14 +38,16 @@ final class BackendController: ObservableObject {
     func start() {
         guard process == nil else { return }
         guard let resources = Bundle.main.resourceURL else {
-            failLaunch("The app resources could not be found.")
+            failLaunch(L10n.text("The app resources could not be found."))
             return
         }
         let backend = resources.appendingPathComponent("backend_v2.py")
-        let python = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/uv/tools/mflux/bin/python")
+        let python = ProcessInfo.processInfo.environment["LIS_MFLUX_PYTHON"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".local/share/uv/tools/mflux/bin/python")
         guard FileManager.default.isExecutableFile(atPath: python.path) else {
-            failLaunch("The existing MFLUX Python runtime could not be found.")
+            failLaunch(L10n.text("The existing MFLUX Python runtime could not be found."))
             return
         }
         let process = Process()
@@ -78,7 +80,7 @@ final class BackendController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if !self.isReady && self.process != nil {
-                    self.failLaunch("The private backend stopped before the app was ready.")
+                    self.failLaunch(L10n.text("The private backend stopped before the app was ready."))
                 }
             }
         }
@@ -91,7 +93,7 @@ final class BackendController: ObservableObject {
             try process.run()
             self.process = process
         } catch {
-            failLaunch("The private backend could not start: \(error.localizedDescription)")
+            failLaunch(L10n.format("The private backend could not start: %@", error.localizedDescription))
         }
     }
 
@@ -155,9 +157,11 @@ final class BackendController: ObservableObject {
 
     private func execute<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw BackendError.message("Invalid backend response.") }
+        guard let http = response as? HTTPURLResponse else { throw BackendError.message(L10n.text("Invalid backend response.")) }
         if !(200..<300).contains(http.statusCode) {
-            let message = (try? decoder.decode(ErrorResponse.self, from: data).error) ?? "Backend request failed (\(http.statusCode))."
+            let decoded = try? decoder.decode(ErrorResponse.self, from: data).error
+            let message = decoded.map { L10n.text($0) }
+                ?? L10n.format("Backend request failed (%d).", http.statusCode)
             throw BackendError.message(message)
         }
         return try decoder.decode(type, from: data)

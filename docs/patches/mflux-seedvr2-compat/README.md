@@ -29,7 +29,7 @@ See individual .patch files in this directory for each MFLUX source file.
 
 ```bash
 # 1. Ensure correct versions are installed
-/Users/ricknichols/.local/share/uv/tools/mflux/bin/python -c "
+~/.local/share/uv/tools/mflux/bin/python -c "
 import importlib.metadata as meta
 assert meta.version('mlx') == '0.32.2', f'mlx version mismatch: {meta.version(\"mlx\")}'
 assert meta.version('mflux') == '0.19.1', f'mflux version mismatch: {meta.version(\"mflux\")}'
@@ -171,4 +171,3 @@ INSERT statements have matching column/placeholder/value counts.
 `backend_v2.py` is copied from this patch directory (not the base v2 source) so
 that both the MLX compatibility patches and the INSERT fix are included in the
 .app bundle.
-

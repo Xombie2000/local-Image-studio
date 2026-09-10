@@ -102,7 +102,7 @@ final class StudioStore: ObservableObject {
         let id = UUID()
         let projectId: String?
         var name: String
-        var title: String { projectId == nil ? "New Project" : "Rename Project" }
+        var title: String { L10n.text(projectId == nil ? "New Project" : "Rename Project") }
     }
 
     struct Confirmation: Identifiable {
@@ -287,20 +287,20 @@ final class StudioStore: ObservableObject {
             lastHelperMetrics = response.promptHelper.hasDisplayMetrics ? response.promptHelper : nil
             guard revision == selectionRevision else { return }
             guard workspace.originalPrompt == original else {
-                promptImprovementNotice = "Your prompt changed while enhancing. It was kept; click Enhance to try again."
+                promptImprovementNotice = L10n.text("Your prompt changed while enhancing. It was kept; click Enhance to try again.")
                 return
             }
             applyEnhancement(response, original: original)
         } catch {
             lastHelperMetrics = nil
             guard revision == selectionRevision else { return }
-            promptImprovementNotice = "Enhancement failed: \(error.localizedDescription) Your prompt was kept; you can retry or Generate."
+            promptImprovementNotice = L10n.format("Enhancement failed: %@ Your prompt was kept; you can retry or Generate.", error.localizedDescription)
         }
     }
 
     func applyEnhancement(_ response: PromptEnhancementResponse, original: String) {
         guard response.enhanced else {
-            promptImprovementNotice = response.notice ?? "Enhancement unavailable. Your prompt was kept; you can retry or Generate."
+            promptImprovementNotice = response.notice.map(L10n.text) ?? L10n.text("Enhancement unavailable. Your prompt was kept; you can retry or Generate.")
             return
         }
         preEnhancementPrompt = original
@@ -322,7 +322,7 @@ final class StudioStore: ObservableObject {
         selectedProjectId = nil
         newImage()
         workspace.originalPrompt = prompt
-        notice = "The selected project is no longer available. Your prompt was kept. Choose a project before generating again."
+        notice = L10n.text("The selected project is no longer available. Your prompt was kept. Choose a project before generating again.")
     }
 
     // Called after library reloads, moves, deletion and request preflight. Never
@@ -362,7 +362,7 @@ final class StudioStore: ObservableObject {
         }
         reconcileProjectSelection()
         if let target, projects.first(where: { $0.id == target })?.archived == true {
-            notice = "Restore the selected project before generating into it. Your prompt was kept."
+            notice = L10n.text("Restore the selected project before generating into it. Your prompt was kept.")
             return false
         }
         return true
@@ -383,6 +383,22 @@ final class StudioStore: ObservableObject {
 
     func editSelected() {
         guard let generation = selectedGeneration else { return }
+        let selectedModel = generation.isUpscale ? selectedImageModel : generation.modelId
+        let editModel: ModelInfo?
+        if selectedModel == "krea2_turbo" {
+            let installedFluxModels = generationModels.filter {
+                $0.id != "krea2_turbo" && $0.status == "Installed"
+            }
+            editModel = installedFluxModels.first(where: { $0.id == selectedImageModel })
+                ?? installedFluxModels.first(where: { $0.id == "flux2_klein_4b" })
+                ?? installedFluxModels.first
+            guard editModel != nil else {
+                errorMessage = L10n.text("Install a FLUX model before editing an image. Krea 2 Turbo does not support reference editing.")
+                return
+            }
+        } else {
+            editModel = nil
+        }
         select(generation)
         selectedGeneration = nil
         workspace.mode = .edit
@@ -391,6 +407,12 @@ final class StudioStore: ObservableObject {
         workspace.referenceName = generation.filename
         workspace.originalPrompt = ""
         workspace.randomSeed = true
+        if let editModel {
+            let previousModel = workspace.modelId
+            workspace.modelId = editModel.id
+            applyImageModelDefaults(for: editModel.id, replacingDefaultsFor: previousModel)
+            notice = L10n.format("This reference edit will use %@; Krea 2 Turbo remains selected for new images.", editModel.label)
+        }
         showInspector = true
     }
 
@@ -417,7 +439,10 @@ final class StudioStore: ObservableObject {
     func generate() async {
         guard activeJob == nil, !preparingGeneration, !isEnhancing else { return }
         let prompt = workspace.originalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { errorMessage = workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating."; return }
+        guard !prompt.isEmpty else {
+            errorMessage = L10n.text(workspace.mode == .edit ? "Describe what should change." : "Enter a prompt before generating.")
+            return
+        }
         preparingGeneration = true
         defer { preparingGeneration = false }
         let revision = selectionRevision
@@ -433,7 +458,7 @@ final class StudioStore: ObservableObject {
             if error.localizedDescription == "Project not found." {
                 // A project can disappear between preflight and submission.
                 await refresh()
-                notice = "The destination project disappeared before generation could start. Your prompt was kept; choose a project and try again."
+                notice = L10n.text("The destination project disappeared before generation could start. Your prompt was kept; choose a project and try again.")
             } else { errorMessage = error.localizedDescription }
         }
     }
@@ -516,7 +541,7 @@ final class StudioStore: ObservableObject {
         do {
             let response: UnloadResponse = try await backend.post("/api/model/unload")
             modelStatus = response.modelStatus
-            notice = "Model unloaded because macOS reported memory pressure."
+            notice = L10n.text("Model unloaded because macOS reported memory pressure.")
         } catch {}
     }
 
@@ -533,7 +558,7 @@ final class StudioStore: ObservableObject {
     func attachReference(_ url: URL) {
         do {
             let data = try Data(contentsOf: url)
-            guard data.count <= 30 * 1024 * 1024 else { throw BackendError.message("Reference images must be smaller than 30 MB.") }
+            guard data.count <= 30 * 1024 * 1024 else { throw BackendError.message(L10n.text("Reference images must be smaller than 30 MB.")) }
             let type = UTType(filenameExtension: url.pathExtension.lowercased())
             let mime = type == .jpeg ? "image/jpeg" : type == .webP ? "image/webp" : "image/png"
             workspace.referenceData = "data:\(mime);base64,\(data.base64EncodedString())"
@@ -554,7 +579,7 @@ final class StudioStore: ObservableObject {
         guard let path = selectedGeneration?.imagePath, let image = NSImage(contentsOfFile: path) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
-        notice = "Image copied."
+        notice = L10n.text("Image copied.")
     }
 
     func exportImage() {
@@ -567,12 +592,12 @@ final class StudioStore: ObservableObject {
         do {
             if url.pathExtension.lowercased() == "jpg" || url.pathExtension.lowercased() == "jpeg" {
                 guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-                      let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else { throw BackendError.message("Could not encode JPEG.") }
+                      let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else { throw BackendError.message(L10n.text("Could not encode JPEG.")) }
                 try data.write(to: url, options: .atomic)
             } else {
                 try FileManager.default.copyItem(at: URL(fileURLWithPath: generation.imagePath), to: url)
             }
-            notice = "Image exported."
+            notice = L10n.text("Image exported.")
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -587,8 +612,8 @@ final class StudioStore: ObservableObject {
     func requestDeleteGeneration(_ target: Generation? = nil) {
         guard activeJob == nil, let generation = target ?? selectedGeneration else { return }
         confirmation = Confirmation(
-            title: "Delete Image?",
-            message: "Delete “\(generation.originalPrompt.prefix(100))”? This removes its image file and metadata. Child images remain and are reattached to its parent.",
+            title: L10n.text("Delete Image?"),
+            message: L10n.format("Delete “%@”? This removes its image file and metadata. Child images remain and are reattached to its parent.", String(generation.originalPrompt.prefix(100))),
             destructive: true
         ) { [weak self] in self?.deleteGeneration(generation) }
     }
@@ -662,8 +687,11 @@ final class StudioStore: ObservableObject {
     func requestDeleteProject(_ project: ProjectInfo) {
         guard activeJob == nil, let project = projects.first(where: { $0.id == project.id }) else { return }
         confirmation = Confirmation(
-            title: "Delete “\(project.name)”?",
-            message: "This removes the project container. Its \(project.generationCount) image\(project.generationCount == 1 ? "" : "s") will be kept in All Images and the main Local Image Studio folder.",
+            title: L10n.format("Delete “%@”?", project.name),
+            message: L10n.format(
+                project.generationCount == 1 ? "Delete project message — one image" : "Delete project message — multiple images",
+                project.generationCount
+            ),
             destructive: true
         ) { [weak self] in self?.deleteProject(project) }
     }
@@ -706,7 +734,7 @@ final class StudioStore: ObservableObject {
     func installSeedVR2() async {
         do {
             let _: OKResponse = try await backend.post("/api/models/seedvr2_7b/install")
-            notice = "SeedVR2 7B installation started in background."
+            notice = L10n.text("SeedVR2 7B installation started in background.")
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -37,9 +37,8 @@ from PIL import Image
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent
-PARENT_DIR = RESOURCE_DIR.parent
-if str(PARENT_DIR) not in sys.path:
-    sys.path.insert(0, str(PARENT_DIR))
+if str(RESOURCE_DIR) not in sys.path:
+    sys.path.insert(0, str(RESOURCE_DIR))
 import backend as v1  # noqa: E402
 
 
@@ -750,11 +749,19 @@ def enhance_prompt(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         print(f"Prompt enhancement failed: {type(error).__name__}", file=sys.stderr)
         result = PromptHelperResult(prompt, notice="Prompt enhancement unavailable. Your prompt was kept; you can retry or Generate.")
-    enhanced = result.model is not None and result.notice is None
+    completed = result.model is not None and result.notice is None and isinstance(result.prompt, str)
+    unchanged = completed and (
+        re.sub(r"\s+", " ", result.prompt).strip() == re.sub(r"\s+", " ", prompt).strip()
+    )
+    enhanced = completed and not unchanged
+    if completed and unchanged:
+        notice = "The helper found no useful changes. Your prompt was kept; you can edit it or Generate."
+    else:
+        notice = result.notice or "Prompt enhancement unavailable. Your prompt was kept; you can retry or Generate."
     return {
         "prompt": result.prompt if enhanced else prompt,
         "enhanced": enhanced,
-        "notice": result.notice if enhanced else "Prompt enhancement unavailable. Your prompt was kept; you can retry or Generate.",
+        "notice": None if enhanced else notice,
         "prompt_helper": {
             "model": result.model, "tokens_per_second": result.tokens_per_second,
             "time_to_first_token": result.ttft, "token_count": result.token_count,

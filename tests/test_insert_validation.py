@@ -11,7 +11,7 @@ caused "column count != value count" runtime errors.
 Usage:
     python v2/tests/test_insert_validation.py [--source PATH]
 
-Defaults to /Users/ricknichols/LocalImageStudio/v2/backend_v2.py.
+Defaults to the repository's backend_v2.py.
 """
 
 import argparse
@@ -132,7 +132,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--source",
-        default="/Users/ricknichols/LocalImageStudio/v2/backend_v2.py",
+        default=str(Path(__file__).resolve().parents[1] / "backend_v2.py"),
         help="Path to backend_v2.py to validate"
     )
     args = parser.parse_args()

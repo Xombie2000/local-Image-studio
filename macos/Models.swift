@@ -228,6 +228,7 @@ enum HistorySection: String, CaseIterable, Identifiable {
     case previous7Days = "Previous 7 Days"
     case older = "Older"
     var id: String { rawValue }
+    var localizedName: String { L10n.text(rawValue) }
 }
 
 // Fit uses viewport geometry, never the image's native display size. Upscaling
@@ -264,12 +265,12 @@ extension PromptHelperMetrics {
     var displayParts: [String] {
         var parts: [String] = []
         if let rate = tokensPerSecond, rate.isFinite, rate > 0 {
-            parts.append(rate < 0.01 ? "<0.01 tok/s" : rate < 1 ? String(format: "%.2f tok/s", rate) : String(format: "%.0f tok/s", rate))
+            parts.append(rate < 0.01 ? L10n.text("<0.01 tok/s") : rate < 1 ? L10n.format("%.2f tok/s", rate) : L10n.format("%.0f tok/s", rate))
         }
         if let latency = totalTime, latency.isFinite, latency > 0 {
-            parts.append(latency < 0.1 ? "<0.1 s" : String(format: "%.1f s", latency))
+            parts.append(latency < 0.1 ? L10n.text("<0.1 s") : L10n.format("%.1f s", latency))
         }
-        if let count = tokenCount, count > 0 { parts.append("\(count) tokens") }
+        if let count = tokenCount, count > 0 { parts.append(L10n.format("%d tokens", count)) }
         return parts
     }
     var hasDisplayMetrics: Bool { model != nil && model != "Edited by user" && !displayParts.isEmpty }

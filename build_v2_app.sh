@@ -1,30 +1,39 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="${0:A:h:h}"
-V2_DIR="$PROJECT_DIR/v2"
-BUILD_ROOT="$V2_DIR/build"
+PROJECT_DIR="${0:A:h}"
+BUILD_ROOT="$PROJECT_DIR/build"
 BUILD_APP="$BUILD_ROOT/Local Image Studio.app"
 CONTENTS="$BUILD_APP/Contents"
 DESTINATION="$HOME/Applications/Local Image Studio.app"
 V1_FALLBACK="$HOME/Applications/Local Image Studio v1.app"
+MODE="${1:---install}"
+
+if [[ "$MODE" != "--install" && "$MODE" != "--build-only" ]]; then
+  print -u2 "Usage: $0 [--install|--build-only]"
+  exit 2
+fi
 
 rm -rf "$BUILD_ROOT"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 /usr/bin/swiftc -parse-as-library -swift-version 5 -target arm64-apple-macos13.0 \
   -framework AppKit -framework SwiftUI -framework UniformTypeIdentifiers \
-  "$V2_DIR/macos/Models.swift" \
-  "$V2_DIR/macos/BackendController.swift" \
-  "$V2_DIR/macos/StudioStore.swift" \
-  "$V2_DIR/macos/ContentView.swift" \
-  "$V2_DIR/macos/LocalImageStudioApp.swift" \
+  "$PROJECT_DIR/macos/Localization.swift" \
+  "$PROJECT_DIR/macos/Models.swift" \
+  "$PROJECT_DIR/macos/BackendController.swift" \
+  "$PROJECT_DIR/macos/StudioStore.swift" \
+  "$PROJECT_DIR/macos/ContentView.swift" \
+  "$PROJECT_DIR/macos/LocalImageStudioApp.swift" \
   -o "$CONTENTS/MacOS/LocalImageStudio"
 
-cp "$V2_DIR/macos/Info.plist" "$CONTENTS/Info.plist"
+cp "$PROJECT_DIR/macos/Info.plist" "$CONTENTS/Info.plist"
 cp "$PROJECT_DIR/backend.py" "$CONTENTS/Resources/backend.py"
-cp "$V2_DIR/backend_v2.py" "$CONTENTS/Resources/backend_v2.py"
-cp "$V2_DIR/mflux_worker.py" "$CONTENTS/Resources/mflux_worker.py"
+cp "$PROJECT_DIR/backend_v2.py" "$CONTENTS/Resources/backend_v2.py"
+cp "$PROJECT_DIR/mflux_worker.py" "$CONTENTS/Resources/mflux_worker.py"
+for LOCALIZATION in "$PROJECT_DIR"/macos/Resources/*.lproj; do
+  cp -R "$LOCALIZATION" "$CONTENTS/Resources/"
+done
 
 ICONSET="$BUILD_ROOT/AppIcon.iconset"
 mkdir -p "$ICONSET"
@@ -50,6 +59,12 @@ if [[ ! -s "$CONTENTS/Resources/AppIcon.icns" ]]; then
 fi
 
 /usr/bin/codesign --force --sign - "$BUILD_APP" >/dev/null
+
+if [[ "$MODE" == "--build-only" ]]; then
+  print "Built SwiftUI preview: $BUILD_APP"
+  exit 0
+fi
+
 mkdir -p "$HOME/Applications"
 
 if [[ -d "$DESTINATION" && ! -d "$V1_FALLBACK" ]]; then

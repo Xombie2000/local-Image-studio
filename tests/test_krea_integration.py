@@ -23,11 +23,10 @@ import mflux_worker
 
 
 class KreaRegistryTests(unittest.TestCase):
-    def test_registry_entry_and_real_cached_installation(self):
+    def test_registry_entry(self):
         definition = backend.v1.MODEL_DEFINITIONS[backend.KREA_MODEL_ID]
         self.assertEqual(definition["label"], "Krea 2 Turbo")
         self.assertEqual(definition["cache_name"], "models--krea--Krea-2-Turbo")
-        self.assertTrue(backend.model_is_installed(backend.KREA_MODEL_ID))
 
     def test_complete_snapshot_detection_and_missing_behavior_are_offline(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -272,6 +271,9 @@ class KreaPersistenceTests(unittest.TestCase):
                         "peak_memory_bytes": 1,
                     }
                 )
+
+            def unload(self):
+                pass
 
         fake_worker = FakeUpscaleWorker()
         with mock.patch.object(backend, "WORKER", fake_worker), mock.patch.object(

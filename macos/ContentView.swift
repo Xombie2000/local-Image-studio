@@ -28,7 +28,7 @@ struct ContentView: View {
                     Text("Generate with:").font(.subheadline).foregroundStyle(.secondary)
                     Picker("Next generation model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
                         ForEach(store.generationModels) { model in
-                            Text(model.status == "Installed" ? model.label : "\(model.label) (Unavailable)").tag(model.id)
+                            Text(model.status == "Installed" ? model.label : L10n.format("%@ (Unavailable)", model.label)).tag(model.id)
                         }
                     }.labelsHidden().frame(maxWidth: 205)
                         .help("Model for the next generation. The selected image’s model is shown in Image Info.")
@@ -40,7 +40,7 @@ struct ContentView: View {
                 if store.modelStatus.status == "loading" || store.activeJob?.phase == "loading" {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text(store.activeJob?.message ?? "Loading image model…").font(.caption)
+                        Text(store.activeJob.map { L10n.text($0.message) } ?? L10n.text("Loading image model…")).font(.caption)
                     }
                 } else {
                     // Retain native toolbar spacing when the loading label is absent.
@@ -85,15 +85,15 @@ struct ModelResidencyButton: View {
     @State private var showingStatus = false
     private var residency: String {
         let status = store.modelStatus
-        if status.status == "loading" { return "Loading image model…" }
+        if status.status == "loading" { return L10n.text("Loading image model…") }
         if status.status == "loaded", let id = status.modelId, id != "seedvr2_7b" {
-            let name = store.models.first(where: { $0.id == id })?.label ?? "Image model"
-            return "\(name) is loaded in memory."
+            let name = store.models.first(where: { $0.id == id })?.label ?? L10n.text("Image model")
+            return L10n.format("%@ is loaded in memory.", name)
         }
         if status.modelId == "seedvr2_7b" {
-            return store.activeJob == nil ? "Last job used SeedVR2 for upscaling." : "SeedVR2 upscale is running."
+            return L10n.text(store.activeJob == nil ? "Last job used SeedVR2 for upscaling." : "SeedVR2 upscale is running.")
         }
-        return "No generation model is loaded in memory."
+        return L10n.text("No generation model is loaded in memory.")
     }
     var body: some View {
         Button { showingStatus.toggle() } label: { Image(systemName: "info.circle").foregroundStyle(.secondary) }
@@ -103,12 +103,12 @@ struct ModelResidencyButton: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Image Models").font(.headline)
                     ForEach(store.generationModels) { model in
-                        LabeledContent(model.label, value: model.status)
+                        LabeledContent(model.label, value: L10n.text(model.status))
                     }
                     Divider()
                     Text(residency)
                     if let bytes = store.modelStatus.activeMemoryBytes, bytes > 1024 {
-                        Text("Worker active memory: \(formatBytes(bytes))").foregroundStyle(.secondary)
+                        Text(L10n.format("Worker active memory: %@", formatBytes(bytes))).foregroundStyle(.secondary)
                     }
                     Text("Models load when needed for a job.").foregroundStyle(.secondary)
                 }.font(.callout).padding(16).frame(width: 290)
@@ -183,7 +183,7 @@ struct SidebarSectionLabel: View {
     let count: Int
     var body: some View {
         HStack {
-            Text(title).font(.caption.weight(.semibold)).textCase(.uppercase)
+            Text(L10n.text(title)).font(.caption.weight(.semibold)).textCase(.uppercase)
             Spacer()
             Text("\(count)").font(.caption2).foregroundStyle(.tertiary)
         }
@@ -215,12 +215,12 @@ struct ProjectRow: View {
             HStack(spacing: 6) {
                 if !project.archived {
                     Button { store.newImage(in: project) } label: { Image(systemName: "photo.badge.plus") }
-                        .help("New image in \(project.name)").accessibilityLabel("New image in \(project.name)")
+                        .help(L10n.format("New image in %@", project.name)).accessibilityLabel(L10n.format("New image in %@", project.name))
                         .foregroundStyle(newImageHovered ? Color.accentColor : actionForeground)
                         .onHover { newImageHovered = $0 }
                 }
                 Button(role: .destructive) { store.requestDeleteProject(project) } label: { Image(systemName: "trash") }
-                    .help("Delete project \(project.name)").accessibilityLabel("Delete project \(project.name)")
+                    .help(L10n.format("Delete project %@", project.name)).accessibilityLabel(L10n.format("Delete project %@", project.name))
                     .disabled(store.activeJob != nil)
                     .foregroundStyle(deleteHovered ? Color.red : actionForeground)
                     .onHover { deleteHovered = $0 }
@@ -232,7 +232,7 @@ struct ProjectRow: View {
         .contextMenu {
             if !project.archived { Button("New Image") { store.newImage(in: project) } }
             Button("Rename…") { store.editProject(project) }.disabled(project.archived)
-            Button(project.archived ? "Restore Project" : "Archive Project") { store.archiveOrRestore(project) }
+            Button(L10n.text(project.archived ? "Restore Project" : "Archive Project")) { store.archiveOrRestore(project) }
             Button("Reveal in Finder") { store.revealProject(project) }
             Divider()
             Button("Delete Project…", role: .destructive) { store.requestDeleteProject(project) }
@@ -265,13 +265,13 @@ struct HistoryRow: View {
                     .frame(width: 54, height: 54)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(generation.isUpscale ? "Upscale \(generation.upscaleScaleFactor ?? "")" : generation.originalPrompt)
+                    Text(generation.isUpscale ? L10n.format("Upscale %@", generation.upscaleScaleFactor ?? "") : generation.originalPrompt)
                         .font(.caption)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 4) {
                         if generation.variantCount > 1 { Text("\(generation.variantIndex)/\(generation.variantCount)") }
-                        Text(generation.isUpscale ? "SeedVR2" : generation.parentId == nil ? "Original" : generation.referenceUsed ? "Edit" : "Variation / Fork")
+                        Text(L10n.text(generation.isUpscale ? "SeedVR2" : generation.parentId == nil ? "Original" : generation.referenceUsed ? "Edit" : "Variation / Fork"))
                         Text("·")
                         Text(generation.date, style: .time)
                         if generation.archived { Image(systemName: "archivebox") }
@@ -291,7 +291,7 @@ struct HistoryRow: View {
             .padding(.trailing, 5)
             .onHover { deleteHovered = $0 }
             .disabled(store.activeJob != nil)
-            .help("Delete image").accessibilityLabel("Delete image \(generation.filename)")
+            .help(L10n.text("Delete image")).accessibilityLabel(L10n.format("Delete image %@", generation.filename))
         }
         .background(store.selectedGeneration?.id == generation.id ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
         .onHover { hovered = $0 }
@@ -347,16 +347,16 @@ struct PerformanceBar: View {
         HStack(spacing: 8) {
             if let job = store.activeJob {
                 ProgressView().controlSize(.small)
-                Text(job.message).lineLimit(1)
+                Text(L10n.text(job.message)).lineLimit(1)
                 Spacer()
-                if let elapsed = job.elapsed { Text(String(format: "%.1f s", elapsed)).monospacedDigit() }
+                if let elapsed = job.elapsed { Text(L10n.format("%.1f s", elapsed)).monospacedDigit() }
             } else if let generation = store.selectedGeneration {
                 Text(generation.model).lineLimit(1)
                 Spacer()
                 Text("\(generation.width) × \(generation.height)")
-                Text(String(format: "·  %.1f s", generation.generationTime)).monospacedDigit()
+                Text(L10n.format("·  %.1f s", generation.generationTime)).monospacedDigit()
             } else {
-                Text(store.workspace.mode == .edit ? "Edit image" : store.workspace.mode == .fork ? "New variation" : "New image")
+                Text(L10n.text(store.workspace.mode == .edit ? "Edit image" : store.workspace.mode == .fork ? "New variation" : "New image"))
                 Spacer()
                 Text("\(store.workspace.width) × \(store.workspace.height)")
             }
@@ -421,8 +421,8 @@ struct CanvasView: View {
                     Rectangle().fill(.ultraThinMaterial)
                     VStack(spacing: 14) {
                         ProgressView().controlSize(.large)
-                        Text(job.message).font(.headline)
-                        if let elapsed = job.elapsed { Text(String(format: "%.1f seconds", elapsed)).font(.caption).foregroundStyle(.secondary) }
+                        Text(L10n.text(job.message)).font(.headline)
+                        if let elapsed = job.elapsed { Text(L10n.format("%.1f seconds", elapsed)).font(.caption).foregroundStyle(.secondary) }
                     }
                 }
             }
@@ -502,7 +502,7 @@ struct ComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(store.workspace.mode == .edit ? "Describe your changes" : "Prompt").font(.headline)
+                Text(L10n.text(store.workspace.mode == .edit ? "Describe your changes" : "Prompt")).font(.headline)
                 if store.isEnhanced {
                     Text("Enhanced · Review or edit").font(.caption).foregroundStyle(.secondary)
                     Button("Revert to Original") { store.revertPrompt() }.buttonStyle(.borderless).controlSize(.small)
@@ -514,7 +514,7 @@ struct ComposerView: View {
                 }
                 Spacer()
                 Button { store.chooseReferenceImage() } label: { Image(systemName: "paperclip") }
-                    .help(store.workspace.modelId == "krea2_turbo" ? "Krea reference editing is not available; choose a FLUX model." : "Attach reference image")
+                    .help(L10n.text(store.workspace.modelId == "krea2_turbo" ? "Krea reference editing is not available; choose a FLUX model." : "Attach reference image"))
                     .accessibilityLabel("Attach reference image")
                     .disabled(store.workspace.modelId == "krea2_turbo")
             }
@@ -530,7 +530,7 @@ struct ComposerView: View {
                     HStack(spacing: 4) {
                         if store.isEnhancing { ProgressView().controlSize(.mini) }
                         else { Image(systemName: "sparkles") }
-                        Text(store.isEnhancing ? "Enhancing…" : "Enhance")
+                        Text(L10n.text(store.isEnhancing ? "Enhancing…" : "Enhance"))
                     }
                 }
                 .help("Enhance the visible prompt, then review or edit before generating")
@@ -580,9 +580,9 @@ struct HelperPicker: View {
             if store.helperModelID.isEmpty { Text("Unavailable").tag("") }
             ForEach(store.promptHelper.models, id: \.self) { Text(HelperPresentation.name(for: $0)).tag($0) }
             if !store.helperModelID.isEmpty && store.helperUnavailable {
-                Text("\(HelperPresentation.name(for: store.helperModelID)) (unavailable)").tag(store.helperModelID)
+                Text(L10n.format("%@ (unavailable)", HelperPresentation.name(for: store.helperModelID))).tag(store.helperModelID)
             }
-        }.pickerStyle(.menu).help(store.helperModelID == "off" ? "Prompt Helper is off" : "Server model ID: \(store.helperModelID)")
+        }.pickerStyle(.menu).help(store.helperModelID == "off" ? L10n.text("Prompt Helper is off") : L10n.format("Server model ID: %@", store.helperModelID))
     }
 }
 
@@ -594,7 +594,7 @@ struct HelperMetricsLabel: View {
             Text(((includesModel ? [HelperPresentation.name(for: metrics.model!)] : []) + metrics.displayParts).joined(separator: " · "))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                .help("\(metrics.model!) — throughput is output tokens divided by total request latency.")
+                .help(L10n.format("%@ — throughput is output tokens divided by total request latency.", metrics.model!))
                 .accessibilityIdentifier("promptHelperPerformance")
         }
     }
@@ -605,7 +605,7 @@ struct InspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(store.selectedGeneration == nil ? "Generation" : "Image Info").font(.headline)
+                Text(L10n.text(store.selectedGeneration == nil ? "Generation" : "Image Info")).font(.headline)
                 Spacer()
                 Button { store.showInspector = false } label: { Image(systemName: "sidebar.right") }
                     .buttonStyle(.plain).help("Hide inspector").accessibilityLabel("Hide inspector")
@@ -618,11 +618,11 @@ struct InspectorView: View {
                         info("Resolution", "\(gen.width) × \(gen.height)")
                         info("Seed", "\(gen.seed)")
                         info("Steps", "\(gen.steps)")
-                        info("Quantization", gen.quantizationLabel)
+                        info("Quantization", L10n.text(gen.quantizationLabel))
                     }
                     Section("Performance") {
-                        info("Time", String(format: "%.2f s", gen.generationTime))
-                        if !gen.isUpscale { info("Speed", String(format: "%.2f steps/s", gen.stepsPerSecond)) }
+                        info("Time", L10n.format("%.2f s", gen.generationTime))
+                        if !gen.isUpscale { info("Speed", L10n.format("%.2f steps/s", gen.stepsPerSecond)) }
                         if let memory = gen.peakMemoryBytes { info("Peak memory", formatBytes(memory)) }
                     }
                     if let parent = gen.parentId {
@@ -648,7 +648,7 @@ struct InspectorView: View {
                     Section("Generation") {
                         Picker("Image Model", selection: Binding(get: { store.workspace.modelId }, set: { store.chooseImageModel($0) })) {
                             ForEach(store.generationModels) { model in
-                                Text(model.status == "Installed" ? model.label : "\(model.label) (Unavailable)").tag(model.id)
+                                Text(model.status == "Installed" ? model.label : L10n.format("%@ (Unavailable)", model.label)).tag(model.id)
                             }
                         }
                         Picker("Resolution", selection: aspectBinding) {
@@ -698,7 +698,7 @@ struct InspectorView: View {
         }.background(Color(nsColor: .windowBackgroundColor))
     }
     private func info(_ title: String, _ value: String) -> some View {
-        LabeledContent(title) { Text(value).textSelection(.enabled) }
+        LabeledContent(L10n.text(title)) { Text(value).textSelection(.enabled) }
     }
     private var aspectBinding: Binding<String> {
         Binding {
@@ -744,7 +744,7 @@ struct ModelsSheet: View {
                                 .font(.title3).foregroundStyle(model.status == "Installed" ? Color.accentColor : .secondary)
                             VStack(alignment: .leading) {
                                 Text(model.label).font(.headline)
-                                Text(model.status).font(.caption).foregroundStyle(model.status == "Installed" ? Color.green : .secondary)
+                                Text(L10n.text(model.status)).font(.caption).foregroundStyle(model.status == "Installed" ? Color.green : .secondary)
                             }
                             Spacer()
                             if store.modelStatus.modelId == model.id { Text("Resident").font(.caption).foregroundStyle(.green) }
@@ -874,7 +874,7 @@ struct UpscaleSheet: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(sourceGeneration.filename).font(.headline)
                             Text("\(sourceGeneration.width) × \(sourceGeneration.height)").font(.caption).foregroundStyle(.secondary)
-                            Text("Source: \(sourceGeneration.model) · \(formatBytes(sourceGeneration.peakMemoryBytes ?? 0))").font(.caption2).foregroundStyle(.tertiary)
+                            Text(L10n.format("Source: %@ · %@", sourceGeneration.model, formatBytes(sourceGeneration.peakMemoryBytes ?? 0))).font(.caption2).foregroundStyle(.tertiary)
                         }
                     }
 
@@ -969,7 +969,7 @@ struct UpscaleSheet: View {
                 Button {
                     Task { await runUpscale() }
                 } label: {
-                    Text(isRunning ? "Processing…" : "Upscale")
+                    Text(L10n.text(isRunning ? "Processing…" : "Upscale"))
                         .fontWeight(.semibold)
                 }
                 .buttonStyle(.borderedProminent)

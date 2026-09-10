@@ -21,7 +21,11 @@ class ExplicitEnhancementTests(unittest.TestCase):
         self.assertEqual(response["prompt_helper"]["tokens_per_second"], 12)
 
     def test_failure_preserves_original_and_reports_nonblocking_notice(self):
-        for outcome in (backend.PromptHelperResult("different", notice="unavailable"), RuntimeError("test failure")):
+        for outcome in (
+            backend.PromptHelperResult("different", notice="unavailable"),
+            backend.PromptHelperResult(None, model="broken-helper"),
+            RuntimeError("test failure"),
+        ):
             with self.subTest(outcome=type(outcome).__name__), patch.object(backend.PROMPT_HELPER, "improve") as improve:
                 if isinstance(outcome, Exception):
                     improve.side_effect = outcome
@@ -31,6 +35,20 @@ class ExplicitEnhancementTests(unittest.TestCase):
                 self.assertFalse(result["enhanced"])
                 self.assertEqual(result["prompt"], "  original\n")
                 self.assertTrue(result["notice"])
+
+    def test_noop_response_is_not_reported_as_an_enhancement(self):
+        original = "A polished prompt with soft studio lighting."
+        for returned in (original, "  A polished prompt  with soft studio lighting.\n"):
+            with self.subTest(returned=returned), patch.object(
+                backend.PROMPT_HELPER,
+                "improve",
+                return_value=backend.PromptHelperResult(returned, model="exact-helper"),
+            ):
+                result = backend.enhance_prompt({"prompt": original, "model_id": "exact-helper"})
+            self.assertFalse(result["enhanced"])
+            self.assertEqual(result["prompt"], original)
+            self.assertIn("no useful changes", result["notice"])
+            self.assertEqual(result["prompt_helper"]["model"], "exact-helper")
 
     def test_final_prompt_disables_both_hidden_rewrite_paths_and_keeps_whitespace(self):
         original = "  current editor: 日本語\nexactly eight wheels; no visible weapons  "

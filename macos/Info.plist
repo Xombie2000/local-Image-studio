@@ -3,6 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>ja</string></array>
   <key>CFBundleDisplayName</key><string>Local Image Studio</string>
   <key>CFBundleExecutable</key><string>LocalImageStudio</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>

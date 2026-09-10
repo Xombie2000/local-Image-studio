@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             backing: .buffered,
             defer: false
         )
-        mainWindow.title = "Local Image Studio"
+        mainWindow.title = L10n.text("Local Image Studio")
         mainWindow.titleVisibility = .hidden
         mainWindow.titlebarAppearsTransparent = true
         mainWindow.minSize = NSSize(width: 940, height: 680)
@@ -85,66 +85,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
-        appMenu.addItem(withTitle: "About Local Image Studio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L10n.text("About Local Image Studio"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: L10n.text("Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         appMenu.addItem(settings)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Local Image Studio", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: L10n.text("Hide Local Image Studio"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Local Image Studio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L10n.text("Quit Local Image Studio"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let fileItem = NSMenuItem()
         menu.addItem(fileItem)
-        let fileMenu = NSMenu(title: "File")
+        let fileMenu = NSMenu(title: L10n.text("File"))
         fileItem.submenu = fileMenu
-        fileMenu.addItem(command("New Image", action: #selector(newImage), key: "n"))
-        fileMenu.addItem(command("New Project…", action: #selector(newProject), key: "n", modifiers: [.command, .shift]))
+        fileMenu.addItem(command(L10n.text("New Image"), action: #selector(newImage), key: "n"))
+        fileMenu.addItem(command(L10n.text("New Project…"), action: #selector(newProject), key: "n", modifiers: [.command, .shift]))
         fileMenu.addItem(.separator())
-        fileMenu.addItem(command("Save As…", action: #selector(exportImage), key: "s"))
-        fileMenu.addItem(command("Export…", action: #selector(exportImage), key: "e"))
+        fileMenu.addItem(command(L10n.text("Save As…"), action: #selector(exportImage), key: "s"))
+        fileMenu.addItem(command(L10n.text("Export…"), action: #selector(exportImage), key: "e"))
 
         let editItem = NSMenuItem()
         menu.addItem(editItem)
-        let editMenu = NSMenu(title: "Edit")
+        let editMenu = NSMenu(title: L10n.text("Edit"))
         editItem.submenu = editMenu
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(withTitle: L10n.text("Undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: L10n.text("Redo"), action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: L10n.text("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: L10n.text("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: L10n.text("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: L10n.text("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
-        editMenu.addItem(command("Copy Image", action: #selector(copyImage), key: "c"))
+        editMenu.addItem(command(L10n.text("Copy Image"), action: #selector(copyImage), key: "c"))
 
         let generationItem = NSMenuItem()
         menu.addItem(generationItem)
-        let generationMenu = NSMenu(title: "Generation")
+        let generationMenu = NSMenu(title: L10n.text("Generation"))
         generationItem.submenu = generationMenu
-        generationMenu.addItem(command("Generate", action: #selector(generate), key: "g"))
+        generationMenu.addItem(command(L10n.text("Generate"), action: #selector(generate), key: "g"))
         generationMenu.addItem(.separator())
-        generationMenu.addItem(command("Fork", action: #selector(forkImage), key: ""))
-        generationMenu.addItem(command("Edit", action: #selector(editImage), key: ""))
-        generationMenu.addItem(command("Reveal in Finder", action: #selector(revealImage), key: ""))
+        generationMenu.addItem(command(L10n.text("Fork"), action: #selector(forkImage), key: ""))
+        generationMenu.addItem(command(L10n.text("Edit"), action: #selector(editImage), key: ""))
+        generationMenu.addItem(command(L10n.text("Reveal in Finder"), action: #selector(revealImage), key: ""))
 
         let viewItem = NSMenuItem()
         menu.addItem(viewItem)
-        let viewMenu = NSMenu(title: "View")
+        let viewMenu = NSMenu(title: L10n.text("View"))
         viewItem.submenu = viewMenu
-        viewMenu.addItem(command("Toggle Sidebar", action: #selector(toggleSidebar), key: "s", modifiers: [.command, .control]))
-        viewMenu.addItem(command("Toggle Inspector", action: #selector(toggleInspector), key: "i", modifiers: [.command, .option]))
+        viewMenu.addItem(command(L10n.text("Toggle Sidebar"), action: #selector(toggleSidebar), key: "s", modifiers: [.command, .control]))
+        viewMenu.addItem(command(L10n.text("Toggle Inspector"), action: #selector(toggleInspector), key: "i", modifiers: [.command, .option]))
         viewMenu.addItem(.separator())
-        viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        viewMenu.addItem(withTitle: L10n.text("Enter Full Screen"), action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         viewMenu.items.last?.keyEquivalentModifierMask = [.command, .control]
 
         let windowItem = NSMenuItem()
         menu.addItem(windowItem)
-        let windowMenu = NSMenu(title: "Window")
+        let windowMenu = NSMenu(title: L10n.text("Window"))
         windowItem.submenu = windowMenu
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: L10n.text("Minimize"), action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: L10n.text("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = menu
@@ -189,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             backing: .buffered,
             defer: false
         )
-        window.title = "Local Image Studio Settings"
+        window.title = L10n.text("Local Image Studio Settings")
         window.contentView = hosting
         window.center()
         settingsWindow = window

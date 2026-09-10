@@ -5,14 +5,18 @@ import os
 import psutil
 import threading
 import queue
+import os
 from pathlib import Path
 
 def run_telemetry_test():
-    workspace_dir = Path("/Users/ricknichols/LocalImageStudio/v2")
+    workspace_dir = Path(__file__).resolve().parents[1]
     worker_script = workspace_dir / "mflux_worker.py"
     test_input = workspace_dir / "test_input.png"
     test_output = workspace_dir / "test_output.png"
-    python_exe = "/Users/ricknichols/.local/share/uv/tools/mflux/bin/python"
+    python_exe = os.environ.get(
+        "LIS_MFLUX_PYTHON",
+        str(Path.home() / ".local/share/uv/tools/mflux/bin/python"),
+    )
 
     if not test_input.exists():
         print(f"Error: {test_input} not found.")

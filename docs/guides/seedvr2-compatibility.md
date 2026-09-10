@@ -79,14 +79,14 @@ MFLUX Python path: `~/.local/share/uv/tools/mflux/bin/python`
 Run the verification script included in the patch directory:
 
 ```bash
-/Users/ricknichols/.local/share/uv/tools/mflux/bin/python \
+~/.local/share/uv/tools/mflux/bin/python \
   v2/docs/patches/mflux-seedvr2-compat/verify_seedvr2.py
 ```
 
 Or run the inline verification (from `README.md` in patch directory):
 
 ```bash
-/Users/ricknichols/.local/share/uv/tools/mflux/bin/python -c "
+~/.local/share/uv/tools/mflux/bin/python -c "
 import importlib.metadata as meta
 assert meta.version('mlx') == '0.32.2'
 assert meta.version('mflux') == '0.19.1'
@@ -110,7 +110,7 @@ If you update MFLUX and SeedVR2 breaks:
 ### Step 1: Identify the broken file
 Run a minimal import test:
 ```bash
-/Users/ricknichols/.local/share/uv/tools/mflux/bin/python -c "from mflux.models.seedvr2 import SeedVR2"
+~/.local/share/uv/tools/mflux/bin/python -c "from mflux.models.seedvr2 import SeedVR2"
 ```
 
 ### Step 2: Compare with the patch

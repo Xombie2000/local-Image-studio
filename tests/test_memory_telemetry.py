@@ -2,12 +2,17 @@ import subprocess
 import json
 import time
 import os
-import psutil
+import sys
 from pathlib import Path
 from PIL import Image
 
 def run_test():
-    workspace_dir = Path("/Users/ricknichols/LocalImageStudio/v2")
+    try:
+        import psutil
+    except ImportError as error:
+        raise RuntimeError("Install development dependencies with: python -m pip install -r requirements-dev.txt") from error
+
+    workspace_dir = Path(__file__).resolve().parents[1]
     worker_script = workspace_dir / "mflux_worker.py"
     test_input = workspace_dir / "test_input.png"
     test_output = workspace_dir / "test_output.png"
@@ -20,7 +25,7 @@ def run_test():
     # Start the worker
     print(f"Starting worker: {worker_script}")
     process = subprocess.Popen(
-        ["python3", str(worker_script)],
+        [sys.executable, str(worker_script)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

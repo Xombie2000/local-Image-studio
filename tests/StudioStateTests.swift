@@ -30,33 +30,6 @@ struct StudioStateTests {
         precondition(PromptEditorSizing.height(for: "1\n2\n3\n4\n5\n6") == 72)
         let suite = "LocalImageStudio.RedesignStateTests"
         let defaults = UserDefaults(suiteName: suite)!
-        if CommandLine.arguments.contains("--restore") {
-            let store = StudioStore(defaults: defaults)
-            precondition(store.selectedImageModel == "krea2_turbo")
-            precondition(store.workspace.modelId == "krea2_turbo")
-            precondition(store.workspace.steps == 8 && store.workspace.quantization == 8)
-            precondition(store.helperModelID == "server/exact-chat-id")
-            store.projects = [project("A"), project("B")]
-            store.generations = [generation("image-A", project: "A")]
-            store.restoreProjectSelection()
-            precondition(store.selectedProjectId == "B" && store.selectedGeneration == nil)
-            precondition(store.workspace.projectId == "B")
-            store.selectProject(nil)
-            defaults.synchronize()
-            let allImages = StudioStore(defaults: defaults)
-            allImages.projects = store.projects
-            allImages.generations = store.generations
-            allImages.restoreProjectSelection()
-            precondition(allImages.selectedProjectId == nil && allImages.selectedGeneration?.id == "image-A")
-            store.selectProject("A")
-            let deletedAtRestart = StudioStore(defaults: defaults)
-            deletedAtRestart.projects = [project("B")]
-            deletedAtRestart.restoreProjectSelection()
-            precondition(deletedAtRestart.selectedProjectId == nil && deletedAtRestart.selectedGeneration == nil)
-            defaults.removePersistentDomain(forName: suite)
-            print("PASS: model and project preferences restored in a separate process; All Images and deleted-project recovery")
-            return
-        }
         defaults.removePersistentDomain(forName: suite)
         let store = StudioStore(defaults: defaults)
         let decoder = JSONDecoder()
@@ -79,12 +52,45 @@ struct StudioStateTests {
         precondition(!store.promptImprovement)
         store.chooseHelper("server/exact-chat-id")
         precondition(store.promptImprovement && store.helperUnavailable)
+        store.chooseImageModel("krea2_turbo")
+        store.select(generation("krea-image", project: nil, model: "krea2_turbo"))
+        store.editSelected()
+        precondition(store.workspace.mode == .edit)
+        precondition(store.workspace.modelId == "flux2_klein_4b")
+        precondition(store.workspace.referenceGenerationId == "krea-image")
+        precondition(store.workspace.steps == 4 && store.workspace.quantization == nil)
+        precondition(store.selectedImageModel == "krea2_turbo")
+        precondition(store.notice?.contains("Krea 2 Turbo remains selected") == true)
+        store.chooseImageModel("flux2_klein_9b")
         store.newImage()
         precondition(store.workspace.modelId == "flux2_klein_9b")
         checkEnhancement(store)
         checkProjects(store)
         store.chooseImageModel("krea2_turbo")
         defaults.synchronize()
+        let restored = StudioStore(defaults: defaults)
+        precondition(restored.selectedImageModel == "krea2_turbo")
+        precondition(restored.workspace.modelId == "krea2_turbo")
+        precondition(restored.workspace.steps == 8 && restored.workspace.quantization == 8)
+        precondition(restored.helperModelID == "server/exact-chat-id")
+        restored.projects = [project("A"), project("B")]
+        restored.generations = [generation("image-A", project: "A")]
+        restored.restoreProjectSelection()
+        precondition(restored.selectedProjectId == "B" && restored.selectedGeneration == nil)
+        precondition(restored.workspace.projectId == "B")
+        restored.selectProject(nil)
+        let allImages = StudioStore(defaults: defaults)
+        allImages.projects = restored.projects
+        allImages.generations = restored.generations
+        allImages.restoreProjectSelection()
+        precondition(allImages.selectedProjectId == nil && allImages.selectedGeneration?.id == "image-A")
+        restored.selectProject("A")
+        let deletedAtRestart = StudioStore(defaults: defaults)
+        deletedAtRestart.projects = [project("B")]
+        deletedAtRestart.restoreProjectSelection()
+        precondition(deletedAtRestart.selectedProjectId == nil && deletedAtRestart.selectedGeneration == nil)
+        defaults.removePersistentDomain(forName: suite)
+        print("PASS: model and project preferences restored; All Images and deleted-project recovery")
         print("PASS: fit geometry, purpose filtering, independent selection and New Image state")
     }
 
@@ -92,11 +98,11 @@ struct StudioStateTests {
         ProjectInfo(id: id, name: id, archived: false, generationCount: id == "A" ? 1 : 0, createdAt: "", updatedAt: "")
     }
 
-    static func generation(_ id: String, project: String?) -> Generation {
+    static func generation(_ id: String, project: String?, model: String = "flux2_klein_4b") -> Generation {
         Generation(id: id, parentId: nil, projectId: project, originalPrompt: "cat", improvedPrompt: "cat",
                    promptImprovementModel: nil, promptImprovementStrength: nil,
                    promptHelper: PromptHelperMetrics(model: nil, tokensPerSecond: nil, timeToFirstToken: nil, tokenCount: nil, totalTime: nil),
-                   modelId: "flux2_klein_4b", model: "FLUX 4B", quantization: nil, quantizationLabel: "None", seed: 42,
+                   modelId: model, model: model == "krea2_turbo" ? "Krea 2 Turbo" : "FLUX 4B", quantization: nil, quantizationLabel: "None", seed: 42,
                    width: 512, height: 512, steps: 4, generationTime: 1, secondsPerImage: 1, stepsPerSecond: 4,
                    peakMemoryBytes: nil, gpuUtilization: nil, referenceUsed: false, referenceSourceId: nil,
                    referenceImagePath: nil, loraName: nil, loraScale: nil, variantGroupId: nil, variantIndex: 1,

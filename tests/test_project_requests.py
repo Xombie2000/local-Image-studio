@@ -10,6 +10,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 
 
@@ -72,13 +73,13 @@ class ProjectRequestTests(unittest.TestCase):
     def test_create_then_immediate_generation_uses_persisted_id(self):
         status, project = self.request("/api/projects", {"name": "Immediate"})
         self.assertEqual(status, 201)
-        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT name FROM projects WHERE id=?", (project["id"],)).fetchone(), ("Immediate",))
         generation = self.generate(project["id"])
         self.assertEqual(generation["project_id"], project["id"])
         self.assertIsNone(generation["parent_id"])
         self.assertTrue(Path(generation["image_path"]).is_file())
-        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT project_id FROM generations WHERE id=?", (generation["id"],)).fetchone(), (project["id"],))
 
     def test_deleted_project_rejected_and_recreated_name_has_new_id(self):
@@ -102,7 +103,7 @@ class ProjectRequestTests(unittest.TestCase):
                 self.assertEqual(generation["original_prompt"], text)
                 self.assertEqual(generation["improved_prompt"], text)
                 self.assertIsNone(generation["prompt_helper"]["model"])
-                with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+                with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
                     self.assertEqual(connection.execute("SELECT prompt FROM generations WHERE id=?", (generation["id"],)).fetchone(), (text,))
 
     def test_project_delete_preserves_images_and_image_delete_reattaches_children(self):
@@ -112,10 +113,10 @@ class ProjectRequestTests(unittest.TestCase):
         grandchild = self.generate(project["id"], parent_id=child["id"])
         self.assertEqual(self.request(f"/api/generations/{child['id']}", method="DELETE")[0], 200)
         self.assertFalse(Path(child["image_path"]).exists())
-        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT parent_id FROM generations WHERE id=?", (grandchild["id"],)).fetchone(), (parent["id"],))
         self.assertEqual(self.request(f"/api/projects/{project['id']}", method="DELETE")[0], 200)
-        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             for generation in (parent, grandchild):
                 row = connection.execute("SELECT project_id,image_path FROM generations WHERE id=?", (generation["id"],)).fetchone()
                 self.assertIsNone(row[0])
@@ -126,7 +127,7 @@ class ProjectRequestTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(result["enhanced"])
         self.assertEqual(result["prompt"], "unchanged draft")
-        with sqlite3.connect(self.root / "support/history.sqlite3") as connection:
+        with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM generations WHERE original_prompt=?", ("unchanged draft",)).fetchone(), (0,))
 
 

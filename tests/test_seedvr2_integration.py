@@ -332,7 +332,15 @@ def main():
         backend_path = str(script_dir / "backend_v2.py")
 
         server_proc = subprocess.Popen(
-            ["/Users/ricknichols/.local/share/uv/tools/mflux/bin/python", backend_path, "--port", str(args.port)],
+            [
+                os.environ.get(
+                    "LIS_MFLUX_PYTHON",
+                    str(Path.home() / ".local/share/uv/tools/mflux/bin/python"),
+                ),
+                backend_path,
+                "--port",
+                str(args.port),
+            ],
             stdout=open(args.log_path, "w"),
             stderr=subprocess.STDOUT,
         )
