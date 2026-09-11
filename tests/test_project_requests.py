@@ -122,7 +122,7 @@ class ProjectRequestTests(unittest.TestCase):
                 with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
                     self.assertEqual(connection.execute("SELECT prompt FROM generations WHERE id=?", (generation["id"],)).fetchone(), (text,))
 
-    def test_project_delete_preserves_images_and_image_delete_reattaches_children(self):
+    def test_project_delete_removes_images_and_image_delete_reattaches_children(self):
         _, project = self.request("/api/projects", {"name": "Delete Actions"})
         parent = self.generate(project["id"])
         child = self.generate(project["id"], parent_id=parent["id"])
@@ -134,9 +134,9 @@ class ProjectRequestTests(unittest.TestCase):
         self.assertEqual(self.request(f"/api/projects/{project['id']}", method="DELETE")[0], 200)
         with closing(sqlite3.connect(self.root / "support/history.sqlite3")) as connection:
             for generation in (parent, grandchild):
-                row = connection.execute("SELECT project_id,image_path FROM generations WHERE id=?", (generation["id"],)).fetchone()
-                self.assertIsNone(row[0])
-                self.assertTrue(Path(row[1]).is_file())
+                self.assertIsNone(connection.execute("SELECT id FROM generations WHERE id=?", (generation["id"],)).fetchone())
+                self.assertFalse(Path(generation["image_path"]).exists())
+                self.assertFalse(Path(generation["thumbnail_path"]).exists())
 
     def test_unavailable_enhance_returns_prompt_without_generation(self):
         status, result = self.request("/api/prompt/enhance", {"prompt": "unchanged draft", "model_id": "off"})

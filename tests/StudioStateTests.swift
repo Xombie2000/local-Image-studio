@@ -122,7 +122,9 @@ struct StudioStateTests {
         store.projects = [a, b]
         store.generations = [image]
         for _ in 0..<3 {
+            store.historyExpanded = false
             store.selectProject("A")
+            precondition(store.historyExpanded)
             precondition(store.selectedGeneration?.projectId == "A")
             store.selectProject("B")
             precondition(store.selectedGeneration == nil && store.visibleHistory.isEmpty)

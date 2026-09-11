@@ -479,6 +479,8 @@ def delete_project(project_id: str) -> None:
     row = project_row(project_id)
     if not row:
         raise ValueError("Project not found.")
+    # Archived projects must be restored first so their lossless images can be
+    # removed through the same generation cleanup path as active projects.
     if row["archived"]:
         restore_project(project_id)
         row = project_row(project_id)
@@ -486,7 +488,7 @@ def delete_project(project_id: str) -> None:
     with database() as connection:
         generations = connection.execute("SELECT id FROM generations WHERE project_id = ?", (project_id,)).fetchall()
     for generation in generations:
-        move_generation(generation["id"], None)
+        delete_generation(generation["id"])
     package = Path(row["package_path"])
     if package.is_dir():
         shutil.rmtree(package)

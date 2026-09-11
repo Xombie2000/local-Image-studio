@@ -8,6 +8,7 @@ CONTENTS="$BUILD_APP/Contents"
 DESTINATION="$HOME/Applications/Local Image Studio.app"
 V1_FALLBACK="$HOME/Applications/Local Image Studio v1.app"
 MODE="${1:---install}"
+SWIFTC="${LIS_SWIFTC:-/usr/bin/swiftc}"
 
 if [[ "$MODE" != "--install" && "$MODE" != "--build-only" ]]; then
   print -u2 "Usage: $0 [--install|--build-only]"
@@ -17,7 +18,7 @@ fi
 rm -rf "$BUILD_ROOT"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
-/usr/bin/swiftc -parse-as-library -swift-version 5 -target arm64-apple-macos13.0 \
+"$SWIFTC" -parse-as-library -swift-version 5 -target arm64-apple-macos13.0 \
   -framework AppKit -framework SwiftUI -framework UniformTypeIdentifiers \
   "$PROJECT_DIR/macos/Localization.swift" \
   "$PROJECT_DIR/macos/Models.swift" \

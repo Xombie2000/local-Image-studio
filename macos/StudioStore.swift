@@ -238,6 +238,12 @@ final class StudioStore: ObservableObject {
             recoverMissingProject()
             return
         }
+        // A project row is a library filter. Always reveal its filtered image
+        // results so clicking a folder cannot appear to do nothing.
+        if id != nil {
+            projectsExpanded = true
+            historyExpanded = true
+        }
         selectionRevision += 1
         selectedProjectId = id
         if let selected = selectedGeneration,
@@ -707,6 +713,7 @@ final class StudioStore: ObservableObject {
             do {
                 let _: OKResponse = try await backend.delete("/api/projects/\(project.id)")
                 projects.removeAll { $0.id == project.id }
+                generations.removeAll { $0.projectId == project.id }
                 if selectedProjectId == project.id || selectedGeneration?.projectId == project.id || workspace.projectId == project.id {
                     selectedProjectId = nil
                     newImage()

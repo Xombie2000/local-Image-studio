@@ -134,44 +134,55 @@ struct SidebarView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    DisclosureGroup(isExpanded: $store.projectsExpanded) {
-                        VStack(spacing: 2) {
-                            Button { store.selectProject(nil) } label: {
-                                Label("All Images", systemImage: "photo.on.rectangle")
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }.buttonStyle(.plain).padding(6)
-                            ForEach(store.projects) { project in ProjectRow(project: project) }
-                            Button { store.createProject() } label: {
-                                Label("New Project", systemImage: "plus.circle")
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        DisclosureGroup(isExpanded: $store.projectsExpanded) {
+                            VStack(spacing: 2) {
+                                Button { store.selectProject(nil) } label: {
+                                    Label("All Images", systemImage: "photo.on.rectangle")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }.buttonStyle(.plain).padding(6)
+                                ForEach(store.projects) { project in ProjectRow(project: project) }
+                                Button { store.createProject() } label: {
+                                    Label("New Project", systemImage: "plus.circle")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 6)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 6)
+                            .padding(.top, 6)
+                        } label: {
+                            SidebarSectionLabel(title: "Projects", count: store.projects.count)
                         }
-                        .padding(.top, 6)
-                    } label: {
-                        SidebarSectionLabel(title: "Projects", count: store.projects.count)
-                    }
 
-                    DisclosureGroup(isExpanded: $store.historyExpanded) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(store.visibleHistory) { generation in HistoryRow(generation: generation) }
-                            if store.generations.isEmpty {
-                                Text("Generated images will appear here.")
+                        DisclosureGroup(isExpanded: $store.historyExpanded) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(store.visibleHistory) { generation in HistoryRow(generation: generation) }
+                                if store.visibleHistory.isEmpty {
+                                    Text(store.selectedProjectId == nil
+                                         ? L10n.text("Generated images will appear here.")
+                                         : L10n.text("This project has no images yet."))
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                                     .padding(.vertical, 20)
+                                }
                             }
+                            .padding(.top, 8)
+                        } label: {
+                            SidebarSectionLabel(title: "History", count: store.visibleHistory.count)
                         }
-                        .padding(.top, 8)
-                    } label: {
-                        SidebarSectionLabel(title: "History", count: store.visibleHistory.count)
+                        .id("project-history")
+                    }
+                    .padding(12)
+                }
+                .onChange(of: store.selectedProjectId) { projectId in
+                    guard projectId != nil else { return }
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo("project-history", anchor: .top) }
                     }
                 }
-                .padding(12)
             }
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))

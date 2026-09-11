@@ -54,6 +54,7 @@
 "Projects" = "プロジェクト";
 "All Images" = "すべての画像";
 "Generated images will appear here." = "生成した画像がここに表示されます。";
+"This project has no images yet." = "このプロジェクトにはまだ画像がありません。";
 "History" = "履歴";
 "New image in %@" = "%@で新規画像を作成";
 "Delete project %@" = "プロジェクト「%@」を削除";
@@ -199,8 +200,8 @@
 "Delete Image?" = "画像を削除しますか？";
 "Delete “%@”? This removes its image file and metadata. Child images remain and are reattached to its parent." = "「%@」を削除しますか？画像ファイルとメタデータが削除されます。派生画像は残り、削除する画像の親に付け替えられます。";
 "Delete “%@”?" = "「%@」を削除しますか？";
-"Delete project message — one image" = "プロジェクトの入れ物を削除します。中の画像%d件は「すべての画像」とLocal Image Studioのメインフォルダに残ります。";
-"Delete project message — multiple images" = "プロジェクトの入れ物を削除します。中の画像%d件は「すべての画像」とLocal Image Studioのメインフォルダに残ります。";
+"Delete project message — one image" = "このプロジェクトと中のローカル画像1件を完全に削除します。この操作は取り消せません。";
+"Delete project message — multiple images" = "このプロジェクトと中のローカル画像%d件を完全に削除します。この操作は取り消せません。";
 
 /* Upscale */
 "Upscale" = "アップスケール";

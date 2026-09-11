@@ -53,8 +53,8 @@
 "Delete image %@" = "Delete image %@";
 "Delete Image?" = "Delete Image?";
 "Delete project %@" = "Delete project %@";
-"Delete project message — multiple images" = "Delete project message — multiple images";
-"Delete project message — one image" = "Delete project message — one image";
+"Delete project message — multiple images" = "This permanently deletes the project and all %d local images it contains. This cannot be undone.";
+"Delete project message — one image" = "This permanently deletes the project and its local image. This cannot be undone.";
 "Delete Project…" = "Delete Project…";
 "Delete…" = "Delete…";
 "Derived from a parent image" = "Derived from a parent image";
@@ -86,6 +86,7 @@
 "Generate" = "Generate";
 "Generate with:" = "Generate with:";
 "Generated images will appear here." = "Generated images will appear here.";
+"This project has no images yet." = "This project has no images yet.";
 "Generating locally…" = "Generating locally…";
 "Generation" = "Generation";
 "Generation not found." = "Generation not found.";

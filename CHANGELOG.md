@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Discover prompt-helper models from both LM Studio and oMLX, label them by provider, and route each request to the selected local server.
+- Make project selection reveal its filtered image history and show a clear empty-project state.
+- Permanently remove a project's local images, thumbnails, metadata, and package when the project is deleted.
 
 ## 2.0.0-preview.1
 
