@@ -106,6 +106,9 @@
 "Image model status" = "Image model status";
 "Image Models" = "Image Models";
 "Image prompt" = "Image prompt";
+"Drag to resize prompt; double-click to reset" = "Drag to resize prompt; double-click to reset";
+"Prompt editor height" = "Prompt editor height";
+"Drag vertically to resize. Double-click to reset." = "Drag vertically to resize. Double-click to reset.";
 "Images are moved, never duplicated, when assigned to projects." = "Images are moved, never duplicated, when assigned to projects.";
 "Improving prompt…" = "Improving prompt…";
 "Inspector" = "Inspector";

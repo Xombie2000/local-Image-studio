@@ -562,19 +562,68 @@ def history(limit: int = 500) -> list[dict[str, Any]]:
     return [public_generation(row) for row in rows]
 
 
-PROMPT_HELPER_SYSTEM = """The user's prompt is authoritative.
+PROMPT_HELPER_SYSTEM = """You are an expert image-generation prompt enhancer.
 
-Do not introduce any new objects, characters, weapons, mechanical features, counts, colors, locations, weather, story elements, functions, technologies, or negative requirements unless the user already implied or specified them.
+Transform short user ideas into concise, visually precise, generation-ready image prompts.
 
-You may improve only clarity, visual detail of already-mentioned subjects, material realism in generic terms, lighting, composition, camera framing, texture, and art/rendering style.
+Preserve the user's subject, concept, explicit constraints, and requested visual style above everything else.
 
-The prohibited categories take precedence over the permitted improvements. If an improvement would add something from the prohibited list, omit it. Before returning, silently compare the enhancement with the original and remove anything the user did not imply or specify.
+STYLE-REFERENCE RULE:
+When the user explicitly names a recognizable artist, art movement, established visual style, or aesthetic reference:
+- Treat that reference as high-information. Preserve it explicitly in the output.
+- Do not redundantly translate the entire style into a long list of visual characteristics unless Strong enhancement is selected.
+- Excessive style decomposition can override the image model's own learned understanding of the reference.
 
-Never invent exact counts.
+When the user names or clearly implies an artist, art movement, visual genre, medium, or recognizable aesthetic:
+- identify the defining visual characteristics
+- express those characteristics through concrete visual description
+- make the subject and composition conform to the requested aesthetic
+- do not replace the requested style with a broader generic genre
+- do not add unrelated clichés merely to make the prompt more elaborate
 
-Never turn a short prompt into a detailed creative concept. For short prompts, keep the enhanced version under roughly 2–3x the original semantic detail and normally under 60 words.
+Prefer concrete descriptions of:
+- form and anatomy
+- shapes and proportions
+- materials and surface qualities
+- composition and camera framing
+- lighting
+- palette
+- environment
+- atmosphere
+- artistic medium or rendering treatment
 
-Return only the enhanced prompt."""
+Avoid automatically adding generic clichés such as:
+- neon
+- glowing eyes
+- cyberpunk elements
+- armor
+- weapons
+- random magical effects
+
+For biomechanical imagery:
+- favor seamless organic-machine integration
+- favor ribbed structures, skeletal conduits, sinewy mechanical anatomy, smooth exoskeletal surfaces, and alien organic forms
+- avoid making the subject look like it is merely wearing robotic armor
+
+For surrealist imagery:
+- favor coherent dream logic and stylistically appropriate distortions
+- avoid filling the scene with random bizarre objects
+
+For architectural or geometric styles:
+- make the composition and spatial structure reflect the requested style, not merely decoration
+
+Correct obvious misspellings or shorthand for known visual references when confidence is high.
+
+Prefer the minimum detail necessary to communicate the requested visual idea at the selected enhancement strength. More detail is not automatically better. Leave the image-generation model compositional freedom unless the selected strength calls for greater creative direction.
+
+Expand sparse prompts significantly while remaining focused.
+
+Do not alter explicit counts, required objects, exclusions, or negative constraints.
+
+Output only the final enhanced image prompt.
+Do not explain the enhancement.
+Do not use headings or bullet points.
+Normally produce 1-3 sentences."""
 
 
 PROMPT_NUMBER_WORDS = (
@@ -716,14 +765,10 @@ class LMStudioPromptHelper(PromptHelper):
         provider_id, model = self.split_model(selection)
         endpoint = self.providers[provider_id]["endpoint"]
         instruction = {
-            "light": "Make only light refinements. Stay very close to the original wording and meaning.",
-            "normal": "Make a concise enhancement using only the original subject matter and the permitted presentation categories. Add no named details, parts, or surroundings.",
-            "strong": "Emphasize permitted composition, lighting, texture, and rendering style without adding or elaborating any subject matter. Keep a short prompt under 60 words.",
-        }.get(strength, "Make a concise enhancement using only the original subject matter and the permitted presentation categories. Add no named details, parts, or surroundings.")
-        original_word_count = max(1, len(re.findall(r"\S+", prompt)))
-        short_prompt_limit = min(60, max(12, original_word_count * 3)) if original_word_count <= 30 else None
-        if short_prompt_limit is not None:
-            instruction += f" This is a short prompt. Return one sentence of at most {short_prompt_limit} words."
+            "light": "Lightly refine the prompt while staying very close to the original concept. If the user explicitly names a recognizable artist, art movement, or established visual style, preserve that reference verbatim. Correct obvious spelling or formatting only. Add at most one or two broad supporting visual cues if genuinely useful. Do NOT decompose the named style into detailed anatomy, environment, lighting, palette, or camera instructions. Keep sparse prompts concise, typically around 15-35 words.",
+            "normal": "Expand the prompt into a focused, generation-ready description while preserving the original concept. If the user explicitly names a recognizable artist, art movement, or established visual style, preserve that reference explicitly. Add only a few high-value supporting characteristics. Avoid exhaustive style explanation or full environment staging unless the user asked for it. Leave substantial interpretive freedom to the image model. For sparse prompts, usually aim for about 30-60 words.",
+            "strong": "Substantially expand the prompt into a rich, generation-ready image concept while preserving the user's subject, intent, and explicit constraints. If a named style is present, you may substantially unpack and elaborate it: develop form or anatomy, materials, composition, environment, lighting, palette, atmosphere, and material treatment. Still avoid generic substitutions such as turning biomechanical into generic robot or cyberpunk imagery. Add detail purposefully rather than decoratively. For sparse prompts, usually aim for about 70-120 words.",
+        }.get(strength, "Expand the prompt into a focused, generation-ready description while preserving the original concept. Add meaningful visual detail about the subject, requested style, form, materials, and limited lighting or atmosphere where useful. Suggest environment or composition only when it materially supports the concept. Avoid exhaustive scene staging or unnecessary specificity. For sparse prompts, usually aim for about 30-60 words.")
         clauses = authoritative_prompt_clauses(prompt)
         if clauses:
             instruction += f" Copy these authoritative clauses verbatim: {json.dumps(clauses, ensure_ascii=False)}."
@@ -734,7 +779,7 @@ class LMStudioPromptHelper(PromptHelper):
                 {"role": "user", "content": f"{instruction}\n\nOriginal prompt:\n{prompt}"},
             ],
             "temperature": 0,
-            "max_tokens": 220,
+            "max_tokens": 350,
             "stream": False,
         }
         if re.search(r"qwen.?3\.6.*35b|qwen.*35b", model, re.I):
@@ -758,8 +803,6 @@ class LMStudioPromptHelper(PromptHelper):
             if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
                 raise ValueError("Empty, invalid, or truncated helper response")
             improved = content.strip()
-            if short_prompt_limit is not None and len(re.findall(r"\S+", improved)) > short_prompt_limit:
-                raise ValueError("Over-expanded helper response")
             if not prompt_preserves_authority(prompt, improved):
                 raise ValueError("Helper response changed an authoritative constraint")
             usage = result.get("usage") or {}

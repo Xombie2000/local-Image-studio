@@ -117,6 +117,9 @@
 "Attach reference image" = "参照画像を追加";
 "Krea reference editing is not available; choose a FLUX model." = "Kreaでは参照画像を編集できません。FLUXモデルを選択してください。";
 "Image prompt" = "画像プロンプト";
+"Drag to resize prompt; double-click to reset" = "ドラッグしてプロンプトの高さを変更、ダブルクリックでリセット";
+"Prompt editor height" = "プロンプトエディタの高さ";
+"Drag vertically to resize. Double-click to reset." = "上下にドラッグしてサイズを変更します。ダブルクリックでリセットします。";
 "Enhancing…" = "改善中…";
 "Enhance" = "改善";
 "Enhance the visible prompt, then review or edit before generating" = "表示中のプロンプトを改善し、確認または編集してから生成します";

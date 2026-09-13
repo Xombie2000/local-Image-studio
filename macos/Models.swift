@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct ModelInfo: Codable, Identifiable, Hashable {
@@ -291,10 +292,26 @@ extension PromptHelperMetrics {
     var hasDisplayMetrics: Bool { model != nil && model != "Edited by user" && !displayParts.isEmpty }
 }
 
-// Two visible lines at rest, with a bounded expansion for explicit newlines.
-// Wrapped long text scrolls in the native TextEditor.
+// Keep the prompt comfortable at rest, grow for wrapped text, and leave room for
+// the canvas once the editor reaches its automatic or manually selected limit.
 enum PromptEditorSizing {
-    static func height(for prompt: String) -> CGFloat {
-        CGFloat(min(4, max(2, prompt.components(separatedBy: "\n").count))) * 17 + 4
+    static let minimumHeight: CGFloat = 88
+    static let defaultHeight: CGFloat = 108
+    static let maximumAutomaticHeight: CGFloat = 224
+    static let maximumManualHeight: CGFloat = 360
+
+    static func height(for prompt: String, width: CGFloat = 600) -> CGFloat {
+        let availableWidth = max(80, width - 24)
+        let text = prompt.isEmpty ? " " : prompt + "\n"
+        let bounds = (text as NSString).boundingRect(
+            with: CGSize(width: availableWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]
+        )
+        return min(maximumAutomaticHeight, max(minimumHeight, ceil(bounds.height) + 20))
+    }
+
+    static func clampManualHeight(_ height: CGFloat) -> CGFloat {
+        min(maximumManualHeight, max(minimumHeight, height))
     }
 }

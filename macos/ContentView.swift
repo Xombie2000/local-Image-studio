@@ -507,8 +507,31 @@ struct ActionBar: View {
 struct ComposerView: View {
     @EnvironmentObject private var store: StudioStore
     @FocusState private var promptFocused: Bool
+    @AppStorage("promptEditorPreferredHeight") private var preferredPromptHeight = Double(PromptEditorSizing.defaultHeight)
+    @State private var promptEditorWidth: CGFloat = 600
+    @GestureState private var promptResizeOffset: CGFloat = 0
+
+    private var automaticPromptHeight: CGFloat {
+        PromptEditorSizing.height(for: store.workspace.originalPrompt, width: promptEditorWidth)
+    }
+    private var restingPromptHeight: CGFloat {
+        max(PromptEditorSizing.clampManualHeight(CGFloat(preferredPromptHeight)), automaticPromptHeight)
+    }
     private var promptHeight: CGFloat {
-        PromptEditorSizing.height(for: store.workspace.originalPrompt)
+        PromptEditorSizing.clampManualHeight(restingPromptHeight + promptResizeOffset)
+    }
+    private var promptResizeGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($promptResizeOffset) { value, state, _ in
+                // The composer is docked to the bottom, so dragging upward grows it.
+                state = -value.translation.height
+            }
+            .onEnded { value in
+                preferredPromptHeight = Double(PromptEditorSizing.clampManualHeight(restingPromptHeight - value.translation.height))
+            }
+    }
+    private func adjustPromptHeight(by amount: CGFloat) {
+        preferredPromptHeight = Double(PromptEditorSizing.clampManualHeight(restingPromptHeight + amount))
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -529,12 +552,49 @@ struct ComposerView: View {
                     .accessibilityLabel("Attach reference image")
                     .disabled(store.workspace.modelId == "krea2_turbo")
             }
-            TextEditor(text: $store.workspace.originalPrompt)
-                .font(.body).scrollContentBackground(.hidden)
-                .frame(height: promptHeight).padding(3)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
-                .focused($promptFocused).accessibilityLabel("Image prompt")
-                .disabled(store.activeJob != nil)
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .frame(height: 13)
+                .contentShape(Rectangle())
+                .background(PromptResizeCursorArea())
+                .gesture(promptResizeGesture)
+                .onTapGesture(count: 2) { preferredPromptHeight = Double(PromptEditorSizing.defaultHeight) }
+                .help("Drag to resize prompt; double-click to reset")
+                .accessibilityElement()
+                .accessibilityLabel("Prompt editor height")
+                .accessibilityHint("Drag vertically to resize. Double-click to reset.")
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: adjustPromptHeight(by: 24)
+                    case .decrement: adjustPromptHeight(by: -24)
+                    @unknown default: break
+                    }
+                }
+                Divider()
+                TextEditor(text: $store.workspace.originalPrompt)
+                    .font(.body).scrollContentBackground(.hidden)
+                    .frame(height: promptHeight).padding(3)
+                    .focused($promptFocused).accessibilityLabel("Image prompt")
+                    .disabled(store.activeJob != nil)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.8), lineWidth: 1)
+            }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: PromptEditorWidthPreferenceKey.self, value: proxy.size.width)
+                }
+            }
+            .onPreferenceChange(PromptEditorWidthPreferenceKey.self) { promptEditorWidth = $0 }
             HStack(spacing: 10) {
                 HelperPicker().frame(maxWidth: 280).disabled(store.activeJob != nil || store.isEnhancing)
                 Button { Task { await store.enhancePrompt() } } label: {
@@ -580,6 +640,25 @@ struct ComposerView: View {
             do { try await Task.sleep(nanoseconds: 5_000_000_000); store.notice = nil }
             catch {}
         }
+    }
+}
+
+private struct PromptEditorWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 600
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct PromptResizeCursorArea: NSViewRepresentable {
+    final class CursorView: NSView {
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            addCursorRect(bounds, cursor: .resizeUpDown)
+        }
+    }
+
+    func makeNSView(context: Context) -> CursorView { CursorView() }
+    func updateNSView(_ nsView: CursorView, context: Context) {
+        nsView.window?.invalidateCursorRects(for: nsView)
     }
 }
 

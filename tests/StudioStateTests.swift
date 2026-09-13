@@ -28,8 +28,13 @@ struct StudioStateTests {
         precondition(!missingMetrics.hasDisplayMetrics)
         let validMetrics = PromptHelperMetrics(model: "qwen/qwen3-4b-2507", tokensPerSecond: 185, timeToFirstToken: nil, tokenCount: 126, totalTime: 1.3)
         precondition(validMetrics.displayParts == ["185 tok/s", "1.3 s", "126 tokens"])
-        precondition(PromptEditorSizing.height(for: "short") == 38)
-        precondition(PromptEditorSizing.height(for: "1\n2\n3\n4\n5\n6") == 72)
+        precondition(PromptEditorSizing.height(for: "short") == PromptEditorSizing.minimumHeight)
+        precondition(PromptEditorSizing.height(for: "1\n2\n3\n4\n5\n6") > PromptEditorSizing.minimumHeight)
+        let wrappingPrompt = String(repeating: "detailed cinematic lighting and atmosphere ", count: 20)
+        precondition(PromptEditorSizing.height(for: wrappingPrompt, width: 240) > PromptEditorSizing.height(for: wrappingPrompt, width: 800))
+        precondition(PromptEditorSizing.height(for: wrappingPrompt, width: 80) == PromptEditorSizing.maximumAutomaticHeight)
+        precondition(PromptEditorSizing.clampManualHeight(20) == PromptEditorSizing.minimumHeight)
+        precondition(PromptEditorSizing.clampManualHeight(1_000) == PromptEditorSizing.maximumManualHeight)
         let suite = "LocalImageStudio.RedesignStateTests"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)

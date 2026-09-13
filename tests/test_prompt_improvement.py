@@ -72,10 +72,14 @@ class PromptHelperTests(unittest.TestCase):
         result, _ = self.call(completion("A futuristic armored vehicle", "length"), VEHICLE)
         self.assert_fallback(result, VEHICLE)
 
-    def test_short_prompt_rejects_overexpanded_answer(self):
-        result, payload = self.call(completion("cat " * 30))
-        self.assert_fallback(result)
-        self.assertIn("one sentence of at most 18 words", payload["messages"][1]["content"])
+    def test_short_prompt_allows_meaningful_expansion(self):
+        """Short sparse prompts should be substantially expandable, not rejected."""
+        result, payload = self.call(completion("a dog with biomechanical textures and dark lighting."), "HR Giger dog")
+        self.assertIsNone(result.notice)
+        self.assertIn("dog", result.prompt.lower())
+        payload_content = payload["messages"][1]["content"]
+        self.assertNotIn("one sentence of at most", payload_content)
+        self.assertNotIn("short prompt", payload_content.lower())
 
     def test_changed_constraints_or_invented_counts_fall_back(self):
         invalid = (
@@ -100,7 +104,8 @@ class PromptHelperTests(unittest.TestCase):
         self.assertGreater(result.tokens_per_second, 0)
         self.assertEqual(result.token_count, 1392)
         self.assertEqual(payload["temperature"], 0)
-        self.assertGreaterEqual(payload["max_tokens"], 1536)
+        # Qwen3.6-35b gets 2048; other models get 350
+        self.assertIn(payload["max_tokens"], (350, 2048))
         self.assertNotIn("reasoning_effort", payload)
         self.assertNotIn("chat_template_kwargs", payload)
 
@@ -110,18 +115,79 @@ class PromptHelperTests(unittest.TestCase):
                 result, payload = self.call(completion(VEHICLE_RESULT), VEHICLE, strength)
                 self.assertTrue(payload["messages"][1]["content"].endswith(VEHICLE))
                 system = payload["messages"][0]["content"]
-                for rule in ("user's prompt is authoritative", "objects", "characters", "weapons",
-                             "mechanical features", "counts", "colors", "locations", "weather",
-                             "story elements", "functions", "technologies", "negative requirements",
-                             "prohibited categories take precedence", "silently compare",
-                             "Never invent exact counts", "under roughly 2–3x", "under 60 words",
-                             "Return only the enhanced prompt"):
+                for rule in ("expert image-generation prompt enhancer", "generation-ready",
+                             "Preserve the user's subject", "visual style above everything else",
+                             "art movement", "recognizable aesthetic", "concrete visual description",
+                             "generic genre", "unrelated clichés", "form and anatomy",
+                             "shapes and proportions", "materials and surface qualities",
+                             "composition and camera framing", "lighting", "palette",
+                             "environment", "atmosphere", "artistic medium or rendering treatment",
+                             "neon", "glowing eyes", "cyberpunk elements", "armor", "weapons",
+                             "random magical effects", "organic-machine integration",
+                             "ribbed structures", "skeletal conduits", "sinewy mechanical anatomy",
+                             "smooth exoskeletal surfaces", "alien organic forms",
+                             "dream logic", "coherent dream logic", "random bizarre objects",
+                             "spatial structure reflect the requested style",
+                             "Expand sparse prompts significantly", "explicit counts",
+                             "negative constraints", "Output only the final enhanced image prompt",
+                             "Do not explain", "1-3 sentences"):
                     self.assertIn(rule, system)
                 instruction = payload["messages"][1]["content"].split("\n\nOriginal prompt:", 1)[0]
                 self.assertNotIn("strong visual direction", instruction.lower())
                 self.assertNotIn("add a moderate amount", instruction.lower())
                 for constraint in ("exactly eight wheels", "matte black bodywork", "no visible weapons", "Tokyo at night"):
                     self.assertIn(constraint, result.prompt)
+                # Verify strength instructions reach the model
+                instruction = payload["messages"][1]["content"].split("\n\nOriginal prompt:", 1)[0]
+                if strength == "light":
+                    self.assertIn("modest visual clarification", instruction)
+                elif strength == "normal":
+                    self.assertIn("generation-ready description", instruction.lower())
+                elif strength == "strong":
+                    self.assertIn("Substantially expand sparse input", instruction)
+
+    def test_five_required_prompts_preserve_subject_and_expand_meaningfully(self):
+        """Verify the five required test prompts produce meaningful expansions."""
+        # Mock responses that represent what a real model would return for each prompt.
+        mock_responses = {
+            "HR Giger dog": (
+                "A dog transformed into a biomechanical organism, its anatomy seamlessly fused with smooth ribbed exoskeletal "
+                "surfaces and sinewy tubing. Dark metallic and bone-like textures, eerie low-key lighting, a claustrophobic "
+                "biomechanical atmosphere inspired by H.R. Giger's signature style."
+            ),
+            "Escher library": (
+                "A vast impossible library with interlocking staircases that loop back on themselves in an infinite recursive "
+                "paradox. Books line walls that bend and fold into impossible geometries, with light filtering through "
+                "architectural loops that defy conventional perspective."
+            ),
+            "Dali bedroom": (
+                "A surrealist bedroom where the bed melts softly onto a cracked desert floor, with elongated forms and "
+                "dream-logic distortions. Soft golden light casts impossible shadows across warped furniture and melting walls, "
+                "evoking coherent dream imagery rather than random bizarre objects."
+            ),
+            "gothic vampire woman": (
+                "A pale gothic vampire woman standing in a dark cathedral interior, draped in heavy velvet robes with sharp "
+                "architectural details. Dramatic chiaroscuro lighting from tall stained-glass windows casts long shadows, "
+                "her dark hair framing an intense expression against the gothic stone architecture."
+            ),
+            "Tokyo alley in the rain": (
+                "A narrow Tokyo alleyway glistening with rain, neon signs reflecting in puddles on the wet cobblestone. "
+                "Atmospheric fog rolls between towering buildings, with warm light bleeding from ramen shop windows and "
+                "vending machines casting colored reflections on the slick ground."
+            ),
+        }
+        for input_prompt, mock_content in mock_responses.items():
+            with self.subTest(input=input_prompt):
+                result, payload = self.call(completion(mock_content), input_prompt)
+                self.assertIsNone(result.notice, f"{input_prompt} was rejected")
+                # Verify the output is meaningfully expanded (at least 25 words)
+                word_count = len(result.prompt.split())
+                self.assertGreaterEqual(word_count, 25,
+                                        f"{input_prompt}: output too short ({word_count} words)")
+                # Verify no short-prompt-limit instruction was injected
+                user_msg = payload["messages"][1]["content"]
+                self.assertNotIn("one sentence of at most", user_msg)
+                self.assertNotIn("short prompt", user_msg.lower())
 
     def test_transport_and_malformed_response_fall_back(self):
         for error in (TimeoutError(), urllib.error.URLError("offline"),
@@ -141,7 +207,7 @@ class PromptHelperTests(unittest.TestCase):
     def test_small_model_keeps_existing_budget_and_no_reasoning_overrides(self):
         with patch.object(self.helper, "available_models", return_value=["qwen3-4b-instruct"]):
             result, payload = self.call(completion("A cat on a wooden fence in soft daylight."))
-        self.assertEqual(payload["max_tokens"], 220)
+        self.assertEqual(payload["max_tokens"], 350)
         self.assertNotIn("reasoning_effort", payload)
         self.assertIsNone(result.notice)
 
@@ -202,7 +268,7 @@ class LivePromptHelperTests(unittest.TestCase):
                     self.assertIsNone(result.notice)
                     self.assertEqual(result.model, LIVE_MODEL)
                     self.assertNotEqual(result.prompt, prompt)
-                    self.assertLessEqual(len(result.prompt.split()), 60)
+                    # No arbitrary word limit; let strength instructions guide length
                     self.assertLess(elapsed, 45)
                     if prompt == VEHICLE:
                         for phrase in ("futuristic armored vehicle", "exactly eight wheels", "matte black bodywork",
