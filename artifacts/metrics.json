@@ -1,0 +1,16 @@
+{
+  "dtype" : "bfloat16",
+  "mode" : "t2i",
+  "modelKind" : "klein",
+  "modelSpec" : "\/Users\/ricknichols\/.cache\/huggingface\/hub\/models--black-forest-labs--FLUX.2-klein-4B\/snapshots\/e7b7dc27f91deacad38e78976d1f2b499d76a294",
+  "outputPath" : "\/Users\/ricknichols\/LocalImageStudio-v3\/artifacts\/generated_4b_klein.png",
+  "snapshotPath" : "\/Users\/ricknichols\/.cache\/huggingface\/hub\/models--black-forest-labs--FLUX.2-klein-4B\/snapshots\/e7b7dc27f91deacad38e78976d1f2b499d76a294",
+  "stages" : {
+    "pipeline_generate_s" : 1.3765069589999999,
+    "pipeline_init_s" : 0.712112875,
+    "resolve_snapshot_s" : 7.2334e-05,
+    "total_s" : 2.1196755,
+    "write_image_s" : 0.021645
+  },
+  "steps" : 4
+}
