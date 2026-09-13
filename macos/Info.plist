@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key><array><string>en</string><string>ja</string></array>
+  <key>CFBundleDisplayName</key><string>Local Image Studio</string>
+  <key>CFBundleExecutable</key><string>LocalImageStudio</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIdentifier</key><string>local.ricknichols.LocalImageStudio</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Local Image Studio</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>2.0</string>
+  <key>CFBundleVersion</key><string>2</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.graphics-design</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Local Image Studio Project</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSItemContentTypes</key><array><string>local.ricknichols.lisproject</string></array>
+      <key>LSTypeIsPackage</key><true/>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeConformsTo</key><array><string>com.apple.package</string></array>
+      <key>UTTypeDescription</key><string>Local Image Studio Project</string>
+      <key>UTTypeIdentifier</key><string>local.ricknichols.lisproject</string>
+      <key>UTTypeTagSpecification</key>
+      <dict><key>public.filename-extension</key><array><string>lisproject</string></array></dict>
+    </dict>
+  </array>
+</dict>
+</plist>

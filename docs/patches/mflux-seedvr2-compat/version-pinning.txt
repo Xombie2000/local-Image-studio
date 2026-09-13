@@ -1,0 +1,14 @@
+PYTHON_VERSION=3.13.15
+PYTHON_FULL=3.13.15 (main, Sep  1 2026, 14:05:45) [Clang 22.1.3 ]
+MLX_VERSION=0.32.2
+MLX_CORE_VERSION=0.32.2
+MFLUX_VERSION=0.19.1
+PLATFORM=macOS-26.6.2-arm64-arm-64bit-Mach-O
+MACHINE=arm64
+MFLUX_PYTHON_PATH=~/.local/share/uv/tools/mflux/bin/python
+HF_CACHE_PATH=~/.cache/huggingface
+SEEDVR2_FILES=seedvr2_ema_7b_fp16.safetensors,ema_vae_fp16.safetensors
+FLUX2_KLEIN_4B_FILES=diffusion_pytorch_model.safetensors,model-00001-of-00002.safetensors,model-00002-of-00002.safetensors,diffusion_pytorch_model.safetensors
+FLUX2_KLEIN_9B_FILES=diffusion_pytorch_model-00001-of-00002.safetensors,diffusion_pytorch_model-00002-of-00002.safetensors,model-00004-of-00004.safetensors,model-00001-of-00004.safetensors,model-00003-of-00004.safetensors,model-00002-of-00004.safetensors,diffusion_pytorch_model.safetensors
+LOCALIMAGESTUDIO_MFLUX_WORKER_SHA256=37660179186c
+LOCALIMAGESTUDIO_BACKEND_V2_SHA256=4b938e1f769b

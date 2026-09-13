@@ -1,0 +1,26 @@
+{
+  "request" : {
+    "height" : 512,
+    "lora_scale" : 1,
+    "model_id" : "flux2_klein_4b",
+    "model_retention" : "automatic",
+    "parent_id" : "60b90357-06f6-4ec1-9674-839239224ba2",
+    "project_id" : "2043cd2d-4d11-466e-b895-0b0d821140f7",
+    "prompt" : "A military attack drone from 2100",
+    "prompt_helper_model" : "qwen\/qwen3-4b-2507",
+    "prompt_improvement" : true,
+    "prompt_improvement_strength" : "strong",
+    "quantization" : "none",
+    "random_seed" : false,
+    "seed" : 42,
+    "steps" : 4,
+    "variant_count" : 1,
+    "width" : 512
+  },
+  "response" : "{\"error\":\"Project not found.\"}",
+  "selected_generation_id" : "60b90357-06f6-4ec1-9674-839239224ba2",
+  "selected_generation_project_id" : null,
+  "selected_project_id" : "4f5e3858-7baf-481c-86bc-a3cea4cc874c",
+  "status" : 400,
+  "workspace_project_id" : "2043cd2d-4d11-466e-b895-0b0d821140f7"
+}

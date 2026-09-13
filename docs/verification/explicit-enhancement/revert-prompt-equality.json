@@ -1,0 +1,11 @@
+{
+  "case": "revert",
+  "generation_id": "6186d621-a40f-4c59-91db-72d3bd82fe5a",
+  "project_id": "245a27b1-c4f0-4947-b23d-42a1eb9a3948",
+  "parent_id": null,
+  "visible_prompt": "  a cat sitting on a fence\nSoft daylight.  ",
+  "backend_original_prompt": "  a cat sitting on a fence\nSoft daylight.  ",
+  "backend_effective_prompt": "  a cat sitting on a fence\nSoft daylight.  ",
+  "helper_model_at_generation": null,
+  "sqlite_equality": true
+}

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - run: plutil -lint macos/Info.plist macos/Resources/en.lproj/*.strings macos/Resources/ja.lproj/*.strings
+      - run: ./tests/run_swift_state_tests.sh
+      - name: Compile the app
+        run: |
+          swiftc -parse-as-library -swift-version 5 \
+            -target "$(uname -m)-apple-macos13.0" \
+            -framework AppKit -framework SwiftUI -framework UniformTypeIdentifiers \
+            macos/Localization.swift macos/Models.swift macos/BackendController.swift macos/StudioStore.swift \
+            macos/ContentView.swift macos/LocalImageStudioApp.swift \
+            -o "$RUNNER_TEMP/LocalImageStudio"

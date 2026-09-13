@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Swift/Xcode build artifacts
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Logs / temporary files
+*.log
+*.tmp
+
+# Local Image Studio user data and generated artifacts
+*.lisproject/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+test_out*.png
+test_output*.png
+
+# Local model caches and common model-weight formats
+.cache/
+.huggingface/
+models--*/
+snapshots/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.gguf
