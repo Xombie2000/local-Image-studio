@@ -140,11 +140,11 @@ class PromptHelperTests(unittest.TestCase):
                 # Verify strength instructions reach the model
                 instruction = payload["messages"][1]["content"].split("\n\nOriginal prompt:", 1)[0]
                 if strength == "light":
-                    self.assertIn("modest visual clarification", instruction)
+                    self.assertIn("Lightly refine the prompt while staying very close to the original concept", instruction)
                 elif strength == "normal":
                     self.assertIn("generation-ready description", instruction.lower())
                 elif strength == "strong":
-                    self.assertIn("Substantially expand sparse input", instruction)
+                    self.assertIn("Substantially expand the prompt into a rich, generation-ready image concept", instruction)
 
     def test_five_required_prompts_preserve_subject_and_expand_meaningfully(self):
         """Verify the five required test prompts produce meaningful expansions."""
