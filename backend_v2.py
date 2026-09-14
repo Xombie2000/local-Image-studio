@@ -1463,7 +1463,7 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
 
         if os.environ.get("LIS_TEST_MODE") == "1":
             results = []
-            for output, seed in zip(outputs, seeds, strict=True):
+            for output, seed in zip(outputs, seeds):
                 v1.fake_test_image(output)
                 results.append({"output": str(output), "seed": seed, "generation_time": 0.05, "peak_memory_bytes": v1.process_rss_bytes(os.getpid())})
             peak_rss = v1.process_rss_bytes(os.getpid())
@@ -1490,7 +1490,7 @@ def run_generation(job_id: str, config: dict[str, Any]) -> None:
         model = v1.MODEL_DEFINITIONS[config["model_id"]]
         public_results = []
         for index, (generation_id, output, thumbnail, result) in enumerate(
-            zip(generation_ids, outputs, thumbnails, results, strict=True), start=1
+            zip(generation_ids, outputs, thumbnails, results), start=1
         ):
             v1.create_thumbnail(output, thumbnail)
             elapsed = max(float(result["generation_time"]), 0.001)
