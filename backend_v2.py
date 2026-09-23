@@ -88,6 +88,12 @@ v1.model_is_installed = model_is_installed
 PROJECT_ARCHIVES_DIR = GENERATIONS_DIR / "Archives"
 WORKER_PATH = RESOURCE_DIR / "mflux_worker.py"
 MFLUX_PYTHON = Path(os.environ.get("LIS_MFLUX_PYTHON", Path.home() / ".local/share/uv/tools/mflux/bin/python"))
+LMS_CLI = Path(os.environ.get("LIS_LMS_CLI", Path.home() / ".lmstudio/bin/lms"))
+PROMPT_HELPER_PROVIDERS = {
+    "lms": {"label": "LMS", "endpoint": "http://127.0.0.1:1234"},
+    "omlx": {"label": "oMLX", "endpoint": "http://127.0.0.1:8000"},
+    "ollama": {"label": "Ollama", "endpoint": "http://127.0.0.1:11434"},
+}
 RETENTION_SECONDS = float(os.environ.get("LIS_RETENTION_SECONDS", "300"))
 ARCHIVE_MANIFEST_NAME = ".lisarchive.json"
 ARCHIVE_IMAGE_CODEC = "Lossless WebP (method 6)"
@@ -651,7 +657,11 @@ def prompt_preserves_authority(original: str, enhanced: str) -> bool:
     negative_pattern = r"\b(?:no|without|avoid|exclude|excluding)\b"
     original_negatives = sorted(re.findall(negative_pattern, original.casefold()))
     enhanced_negatives = sorted(re.findall(negative_pattern, enhanced.casefold()))
-    return original_numbers == enhanced_numbers and original_negatives == enhanced_negatives
+    # If the user supplied counts, preserve the complete set exactly. When the
+    # original has no count, ordinary descriptive anatomy (for example, a
+    # spider's eight legs) is not an authoritative constraint and may be added.
+    numbers_preserved = not original_numbers or original_numbers == enhanced_numbers
+    return numbers_preserved and original_negatives == enhanced_negatives
 
 
 class PromptHelperResult:
@@ -670,11 +680,98 @@ class PromptHelper:
         raise NotImplementedError
 
 
+class LMStudioRuntime:
+    """Own an LM Studio daemon/server only when this app had to start it."""
+
+    def __init__(self, cli_path: Path = LMS_CLI):
+        self.cli_path = cli_path
+        self.started_daemon = False
+        self.started_server = False
+
+    @staticmethod
+    def openai_endpoint_available(endpoint: str) -> bool:
+        try:
+            request = urllib.request.Request(f"{endpoint}/v1/models")
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=0.6) as response:
+                return response.status == 200
+        except Exception:
+            return False
+
+    def endpoint_available(self) -> bool:
+        return self.openai_endpoint_available(PROMPT_HELPER_PROVIDERS["lms"]["endpoint"])
+
+    def provider_available(self, provider_id: str) -> bool:
+        if provider_id == "lms":
+            return self.endpoint_available()
+        provider = PROMPT_HELPER_PROVIDERS.get(provider_id)
+        return bool(provider) and self.openai_endpoint_available(provider["endpoint"])
+
+    def status(self, component: str) -> bool:
+        try:
+            result = subprocess.run(
+                [str(self.cli_path), component, "status", "--json"],
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            if result.returncode != 0:
+                return False
+            payload = json.loads(result.stdout or "{}")
+            if component == "daemon":
+                return payload.get("status") == "running"
+            return bool(payload.get("running"))
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            return False
+
+    def action(self, *arguments: str, timeout: float = 15) -> bool:
+        try:
+            result = subprocess.run(
+                [str(self.cli_path), *arguments],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=timeout, check=False,
+            )
+            return result.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def ensure_started(self, preferred_provider: str | None = None) -> bool:
+        if preferred_provider == "off":
+            return False
+        if preferred_provider in PROMPT_HELPER_PROVIDERS:
+            if self.provider_available(preferred_provider):
+                return True
+            # Never launch or stop servers owned by oMLX or Ollama.
+            if preferred_provider != "lms":
+                return False
+        elif any(self.provider_available(provider_id) for provider_id in PROMPT_HELPER_PROVIDERS):
+            return True
+        if not self.cli_path.is_file() or not os.access(self.cli_path, os.X_OK):
+            return False
+
+        if not self.status("daemon"):
+            self.started_daemon = self.action("daemon", "up", "--json")
+        if not self.status("server"):
+            self.started_server = self.action(
+                "server", "start", "--port", "1234", "--bind", "127.0.0.1"
+            )
+
+        for _ in range(30):
+            if self.endpoint_available():
+                return True
+            if SHUTTING_DOWN.wait(0.1):
+                break
+        return False
+
+    def shutdown(self) -> None:
+        if self.started_server:
+            self.action("server", "stop", timeout=8)
+        if self.started_daemon:
+            self.action("daemon", "down", timeout=8)
+        self.started_server = False
+        self.started_daemon = False
+
+
 class LMStudioPromptHelper(PromptHelper):
-    providers = {
-        "lms": {"label": "LMS", "endpoint": "http://127.0.0.1:1234"},
-        "omlx": {"label": "oMLX", "endpoint": "http://127.0.0.1:8000"},
-    }
+    providers = PROMPT_HELPER_PROVIDERS
     model_separator = "::"
     # Retained for compatibility with tests and callers that used the original
     # single-provider helper directly.
@@ -739,7 +836,34 @@ class LMStudioPromptHelper(PromptHelper):
         return True
 
     @staticmethod
-    def choose_model(models: list[str]) -> str | None:
+    def choose_model(models: list[str], explicit_request: str | None = None) -> str | None:
+        """Select a helper model.
+
+        When *explicit_request* is supplied (a specific canonical ID the user
+        chose), return None if it is not available — never silently substitute.
+        When no explicit request is given (first launch / no persisted
+        preference), apply the normal heuristic so a default helper exists.
+        """
+        if explicit_request is not None:
+            # The user explicitly chose this model.  Return it only if it
+            # is actually available; otherwise return None so the caller
+            # knows the selection is unavailable.
+            if explicit_request in models:
+                return explicit_request
+            # Legacy releases stored LM Studio's bare model name. A canonical
+            # provider selection must not migrate to a different provider.
+            requested_bare = LMStudioPromptHelper.bare_model(explicit_request)
+            requested_provider, _ = LMStudioPromptHelper.split_model(explicit_request)
+            for candidate in models:
+                candidate_is_legacy = LMStudioPromptHelper.model_separator not in candidate
+                request_is_legacy = LMStudioPromptHelper.model_separator not in explicit_request
+                if LMStudioPromptHelper.bare_model(candidate) == requested_bare and (
+                    request_is_legacy or (candidate_is_legacy and requested_provider == "lms")
+                ):
+                    return candidate
+            # Explicit request not found — do NOT substitute.
+            return None
+        # No explicit user selection: apply the normal heuristic.
         preferred = [model for model in models if re.search(r"qwen.*3[-_]?4b.*2507", LMStudioPromptHelper.bare_model(model), re.I)]
         if preferred:
             return preferred[0]
@@ -747,18 +871,21 @@ class LMStudioPromptHelper(PromptHelper):
         if small:
             return small[0]
         fallback = [model for model in models if re.search(r"qwen.?3\.6.*35b|qwen.*35b", LMStudioPromptHelper.bare_model(model), re.I)]
-        return fallback[0] if fallback else None
+        if fallback:
+            return fallback[0]
+        return models[0] if models else None
 
     def improve(self, prompt: str, strength: str, model_id: str | None = None) -> PromptHelperResult:
         if model_id == "off":
             return PromptHelperResult(prompt)
         models = self.available_models()
-        selection = None
-        if model_id is not None:
-            selection = model_id if model_id in models else next(
-                (candidate for candidate in models if self.bare_model(candidate) == model_id), None
-            )
+        selection: str | None = None
+        if model_id is not None and model_id != "":
+            # Explicit user selection — use choose_model with explicit_request
+            # so it returns None (not substituted) when the model is unavailable.
+            selection = self.choose_model(models, explicit_request=model_id)
         else:
+            # No explicit user selection — apply the normal heuristic.
             selection = self.choose_model(models)
         if not selection:
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
@@ -809,11 +936,13 @@ class LMStudioPromptHelper(PromptHelper):
             tokens = usage.get("completion_tokens")
             tokens_per_second = (float(tokens) / total) if tokens else None
             return PromptHelperResult(improved, model=selection, tokens_per_second=tokens_per_second, token_count=tokens, total_time=total)
-        except Exception:
+        except Exception as error:
+            print(f"Prompt helper request failed: {type(error).__name__}: {error}", file=sys.stderr)
             return PromptHelperResult(prompt, notice="Prompt improvement unavailable — original prompt used")
 
 
 PROMPT_HELPER = LMStudioPromptHelper()
+PROMPT_HELPER_RUNTIME = LMStudioRuntime()
 
 
 def enhance_prompt(payload: dict[str, Any]) -> dict[str, Any]:
@@ -823,7 +952,11 @@ def enhance_prompt(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Enter a prompt before enhancing.")
     if len(prompt) > 10_000:
         raise ValueError("The prompt is too long (10,000 character maximum).")
-    model_id = str(payload.get("model_id") or "off")
+    # Distinguish no persisted preference (use the discovered default) from an
+    # explicit "off" selection. This also keeps direct API callers functional
+    # before the Swift client has stored its first model preference.
+    raw_model_id = payload.get("model_id")
+    model_id = str(raw_model_id) if raw_model_id else None
     strength = str(payload.get("strength", "normal"))
     if strength not in {"light", "normal", "strong"}:
         strength = "normal"
@@ -1858,9 +1991,16 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--token", default=None)
     parser.add_argument("--parent-pid", type=int, default=None)
+    parser.add_argument("--prompt-helper-model", default="")
     arguments = parser.parse_args()
     ensure_directories()
     initialize_database()
+    preferred_provider = arguments.prompt_helper_model.split("::", 1)[0]
+    if "::" not in arguments.prompt_helper_model:
+        preferred_provider = "lms" if arguments.prompt_helper_model else None
+    if arguments.prompt_helper_model == "off":
+        preferred_provider = "off"
+    PROMPT_HELPER_RUNTIME.ensure_started(preferred_provider)
     token = arguments.token or secrets.token_urlsafe(32)
     signal.signal(signal.SIGTERM, signal_shutdown)
     signal.signal(signal.SIGINT, signal_shutdown)
@@ -1874,6 +2014,7 @@ def main() -> int:
         SHUTTING_DOWN.set()
         cancel_idle_timer()
         WORKER.shutdown()
+        PROMPT_HELPER_RUNTIME.shutdown()
         SERVER.server_close()
     return 0
 

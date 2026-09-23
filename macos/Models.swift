@@ -250,7 +250,7 @@ enum HelperPresentation {
         let provider: String?
         let modelID: String
         if parts.count == 3, parts[1].isEmpty {
-            provider = parts[0] == "lms" ? "LMS" : parts[0] == "omlx" ? "oMLX" : String(parts[0])
+            provider = parts[0] == "lms" ? "LMS" : parts[0] == "omlx" ? "oMLX" : parts[0] == "ollama" ? "Ollama" : String(parts[0])
             modelID = String(parts[2])
         } else {
             provider = nil

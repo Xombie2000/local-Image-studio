@@ -67,6 +67,7 @@ final class BackendController: ObservableObject {
             "--port", "0",
             "--token", token,
             "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
+            "--prompt-helper-model", UserDefaults.standard.string(forKey: "promptHelperModelID") ?? "",
         ]
         process.currentDirectoryURL = resources
         process.standardOutput = stdoutPipe

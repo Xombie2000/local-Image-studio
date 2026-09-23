@@ -95,6 +95,13 @@ class PromptHelperTests(unittest.TestCase):
         self.assertIn('"exactly eight wheels"', payload["messages"][1]["content"])
         self.assertIn('"no visible weapons"', payload["messages"][1]["content"])
 
+    def test_visual_count_can_be_added_when_original_has_no_numeric_constraint(self):
+        result, _ = self.call(completion(
+            "A Giger-inspired half-spider, half-human figure with eight articulated legs, rendered in airbrush."
+        ), "HR giger inspired half spider half man full body shot in airbrush")
+        self.assertIsNone(result.notice)
+        self.assertIn("eight articulated legs", result.prompt)
+
     def test_success_uses_only_answer_and_retains_metrics(self):
         result, payload = self.call(completion("\n\n" + VEHICLE_RESULT), VEHICLE)
         self.assertEqual(result.prompt, VEHICLE_RESULT)
@@ -210,6 +217,80 @@ class PromptHelperTests(unittest.TestCase):
         self.assertEqual(payload["max_tokens"], 350)
         self.assertNotIn("reasoning_effort", payload)
         self.assertIsNone(result.notice)
+
+    def test_non_qwen_chat_model_is_used_for_prompt_improvement(self):
+        """Regression: choose_model must not return None when no Qwen model is loaded.
+
+        When the user manually loads a non-Qwen chat model (e.g. Llama, Mistral),
+        prompt improvement should still work instead of returning 'unavailable'.
+        """
+        non_qwen_models = [
+            "lms::llama-3.2-3b-instruct-q4_K_M",
+            "lms::mistral-7b-instruct-v0.3-q4_K_M",
+            "lms::phi-3-mini-4k-instruct-q4_K_M",
+        ]
+        with patch.object(self.helper, "available_models", return_value=non_qwen_models):
+            result, payload = self.call(completion("A cat on a wooden fence in soft daylight."))
+        # The fix: choose_model should not return None, so prompt improvement works
+        self.assertIsNone(result.notice, f"Expected prompt improvement to work, got: {result.notice}")
+        self.assertIsNotNone(result.model)
+        # Should use a small model (mistral 7b matches the small filter) or first available
+        self.assertIn(payload["max_tokens"], (350, 2048))
+
+    def test_non_qwen_chat_model_with_provider_prefix(self):
+        """Regression: non-Qwen models with provider prefix (e.g. oMLX) also work."""
+        mixed_models = [
+            "lms::qwen3-4b-instruct",
+            "omlx::llama-3.2-3b-instruct-q4_K_M",
+        ]
+        with patch.object(self.helper, "available_models", return_value=mixed_models):
+            result, payload = self.call(completion("A cat on a wooden fence in soft daylight."))
+        # Qwen 4B is preferred, so it should be selected
+        self.assertIsNone(result.notice)
+        self.assertIn("qwen", result.model.lower())
+
+    def test_single_non_qwen_model_is_used(self):
+        """Regression: a single non-Qwen model should be used, not rejected."""
+        with patch.object(self.helper, "available_models", return_value=["lms::llama-3.2-3b-instruct-q4_K_M"]):
+            result, payload = self.call(completion("A cat on a wooden fence in soft daylight."))
+        self.assertIsNone(result.notice, f"Expected prompt improvement to work, got: {result.notice}")
+        self.assertEqual(result.model, "lms::llama-3.2-3b-instruct-q4_K_M")
+
+    def test_enhance_without_persisted_selection_uses_discovered_default(self):
+        helper = backend.LMStudioPromptHelper()
+        answer = "A cat sitting on a weathered fence in soft daylight."
+        with patch.object(helper, "available_models", return_value=["lms::local-chat"]), \
+             patch.object(helper, "request", return_value=response(completion(answer))), \
+             patch.object(backend, "PROMPT_HELPER", helper):
+            result = backend.enhance_prompt({"prompt": CAT, "strength": "normal"})
+        self.assertTrue(result["enhanced"])
+        self.assertEqual(result["prompt"], answer)
+        self.assertEqual(result["prompt_helper"]["model"], "lms::local-chat")
+
+    def test_model_id_with_provider_prefix_matches_bare_name(self):
+        """Regression: selecting a model by its prefixed ID should work even when
+        available_models returns the bare name without the prefix.
+
+        This reproduces the 'Prompt improvement unavailable' bug where the stored
+        helperModelID (e.g. 'lms::qwen3-4b-instruct') doesn't exactly match the
+        format returned by available_models() (e.g. 'qwen3-4b-instruct').
+        """
+        with patch.object(self.helper, "available_models", return_value=["qwen3-4b-instruct"]):
+            with patch.object(self.helper, "request", return_value=response(completion("A cat on a wooden fence in soft daylight."))):
+                result = self.helper.improve(
+                    "A cat on a wooden fence in soft daylight.",
+                    "normal",
+                    model_id="lms::qwen3-4b-instruct",  # prefixed ID from UI (uses :: separator)
+                )
+        self.assertIsNone(result.notice, f"Expected prompt improvement to work, got: {result.notice}")
+        self.assertEqual(result.model, "qwen3-4b-instruct")
+
+    def test_unavailable_canonical_selection_does_not_switch_provider(self):
+        with patch.object(self.helper, "available_models", return_value=["lms::same-model"]), \
+             patch.object(self.helper, "request") as request:
+            result = self.helper.improve(CAT, "normal", model_id="omlx::same-model")
+        self.assert_fallback(result)
+        request.assert_not_called()
 
     def test_generation_uses_and_persists_original_on_failure_and_answer_on_success(self):
         # Exercise the actual generation handoff and job response without GPU work.

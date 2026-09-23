@@ -49,12 +49,16 @@ final class StudioStore: ObservableObject {
     }
 
     func restoreModelPreferences() {
-        if !helperModelID.isEmpty, helperModelID != "off", !promptHelper.models.contains(helperModelID),
-           let migrated = promptHelper.models.first(where: { $0.hasSuffix("::\(helperModelID)") }) {
-            // v2.0.0-preview.1 stored LM Studio's bare model ID. Prefer the
-            // first matching provider (LMS discovery order) after upgrading.
-            helperModelID = migrated
+        // v2.0.0-preview.1 stored LM Studio's bare model ID. Migrate only that
+        // legacy form; preserve unavailable canonical selections so an oMLX
+        // choice can never silently switch to an LMS model with the same name.
+        if !helperModelID.isEmpty, helperModelID != "off", !promptHelper.models.contains(helperModelID) {
+            if !helperModelID.contains("::"),
+               let migrated = promptHelper.models.first(where: { $0.hasSuffix("::\(helperModelID)") }) {
+                helperModelID = migrated
+            }
         }
+        // Do not overwrite a user's stored choice when it is temporarily unavailable.
         if helperModelID.isEmpty, let preferred = promptHelper.model {
             helperModelID = promptImprovement ? preferred : "off"
         }
@@ -489,7 +493,11 @@ final class StudioStore: ObservableObject {
             "variant_count": workspace.variantCount,
             "prompt_is_final": true,
             "prompt_improvement": false,
-            "prompt_helper_model": helperModelID.isEmpty ? "off" : helperModelID,
+            // Send empty string (no preference) vs "off" (explicitly disabled).
+            // restoreModelPreferences() now preserves the user's persisted
+            // choice even when unavailable, so helperModelID will carry that
+            // canonical ID forward to the backend.
+            "prompt_helper_model": helperModelID.isEmpty ? "" : helperModelID,
             "prompt_improvement_strength": promptStrength,
             "model_retention": modelRetention,
             "lora_scale": workspace.loraScale,
